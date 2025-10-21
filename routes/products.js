@@ -2,11 +2,14 @@ const express = require("express");
 const router = express.Router();
 // const tokenVerifier = require("../lib/middlewares/tokenVerifier");
 const productController = require("../controllers/productController");
-const { authMiddleware } = require("../middlewares/authMiddleware");
+const {
+  authMiddleware,
+  optionalAuthMiddleware,
+} = require("../middlewares/authMiddleware");
 
 // Public
 router.get("/", productController.listProducts);
-router.get("/:id", productController.getProduct);
+router.get("/:id", optionalAuthMiddleware, productController.getProduct);
 
 // Protected actions (vendor)
 router.post("/", authMiddleware, productController.addProduct);

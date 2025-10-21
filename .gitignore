@@ -2,3 +2,9 @@
 .env
 /dist
 /lib/generated/prisma
+plan.md
+progress.md
+roadmap.md
+todo.md
+api-documentation.txt
+technical-debt.md

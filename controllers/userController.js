@@ -3,7 +3,7 @@ const { supabase } = require("../config/supabaseClient");
 // Helper: fetch user row and optional vendor join
 async function fetchUserWithVendor(userId) {
   const { data, error } = await supabase
-    .from("Users")
+    .from("users")
     .select(
       "id, first_name, last_name, email, phone_number, whatsapp_number, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, rating)"
     )
@@ -16,22 +16,30 @@ async function fetchUserWithVendor(userId) {
 exports.getMe = async (req, res) => {
   try {
     const userId = req.user && req.user.id;
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const { data, error } = await fetchUserWithVendor(userId);
-    if (error) return res.status(500).json({ message: "Server error.", error });
-    if (!data) return res.status(404).json({ message: "User not found." });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
 
-    return res.json(data);
+    return res.json({ success: true, data });
   } catch (err) {
-    return res.status(500).json({ message: "Server error." });
+    return res.status(500).json({ success: false, message: "Server error." });
   }
 };
 
 exports.updateMe = async (req, res) => {
   try {
     const userId = req.user && req.user.id;
-    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
 
     const allowedFields = [
       "first_name",
@@ -47,7 +55,9 @@ exports.updateMe = async (req, res) => {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     });
     if (Object.keys(updates).length === 0)
-      return res.status(400).json({ message: "No valid fields to update." });
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid fields to update." });
 
     const { data, error } = await supabase
       .from("users")
@@ -55,12 +65,18 @@ exports.updateMe = async (req, res) => {
       .eq("id", userId)
       .select()
       .maybeSingle();
-    if (error) return res.status(500).json({ message: "Server error.", error });
-    if (!data) return res.status(404).json({ message: "User not found." });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
 
-    return res.json(data);
+    return res.json({ success: true, data });
   } catch (err) {
-    return res.status(500).json({ message: "Server error." });
+    return res.status(500).json({ success: false, message: "Server error." });
   }
 };
 
@@ -75,11 +91,17 @@ exports.deactivateMe = async (req, res) => {
       .eq("id", userId)
       .select()
       .maybeSingle();
-    if (error) return res.status(500).json({ message: "Server error.", error });
-    if (!data) return res.status(404).json({ message: "User not found." });
-    return res.json({ message: "Account deactivated." });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
+    return res.json({ success: true, message: "Account deactivated." });
   } catch (err) {
-    return res.status(500).json({ message: "Server error." });
+    return res.status(500).json({ success: false, message: "Server error." });
   }
 };
 
@@ -87,22 +109,16 @@ exports.getUserProfile = async (req, res) => {
   const userId = req.params.userId;
   try {
     const { data, error } = await fetchUserWithVendor(userId);
-    if (error) return res.status(500).json({ message: "Server error.", error });
-    if (!data) return res.status(404).json({ message: "User not found." });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
 
-    const authHeader = req.headers.authorization || req.headers.Authorization;
-    let isAuthed = false;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.split(" ")[1];
-      try {
-        const { data: authData, error: authErr } = await supabase.auth.getUser(
-          token
-        );
-        if (!authErr && authData && authData.user) isAuthed = true;
-      } catch (e) {
-        isAuthed = false;
-      }
-    }
+    const isAuthed = req.user && req.user.id === data.id;
 
     const publicUser = {
       id: data.id,
@@ -114,9 +130,15 @@ exports.getUserProfile = async (req, res) => {
       role: data.role,
     };
 
+    if (isAuthed) {
+      publicUser.email = data.email || null;
+      publicUser.phone = data.phone_number || null;
+      publicUser.whatsapp = data.whatsapp_number || null;
+    }
+
     if (data.business_profile) {
       const vp = data.business_profile;
-      publicUser.vendor = {
+      publicUser.business = {
         id: vp.id,
         businessName: vp.business_name,
         profileImage: vp.profile_image || null,
@@ -127,23 +149,15 @@ exports.getUserProfile = async (req, res) => {
       };
 
       if (isAuthed) {
-        publicUser.vendor.phone = vp.business_phone || null;
-        publicUser.vendor.whatsapp = vp.business_whatsapp_number || null;
-        publicUser.vendor.email = vp.business_email || null;
-        publicUser.vendor.address = vp.address || null;
+        publicUser.business.phone = vp.business_phone || null;
+        publicUser.business.whatsapp = vp.business_whatsapp_number || null;
+        publicUser.business.email = vp.business_email || null;
+        publicUser.business.address = vp.address || null;
       }
     }
 
-    if (isAuthed) {
-      publicUser.contact = {
-        email: data.email || null,
-        phone: data.phone_number || null,
-        whatsapp: data.whatsapp_number || null,
-      };
-    }
-
-    return res.json(publicUser);
+    return res.json({ success: true, publicUser });
   } catch (err) {
-    return res.status(500).json({ message: "Server error." });
+    return res.status(500).json({ success: false, message: "Server error." });
   }
 };

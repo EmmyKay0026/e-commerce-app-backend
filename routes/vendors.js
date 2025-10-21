@@ -1,13 +1,42 @@
 const express = require("express");
 const router = express.Router();
-// const tokenVerifier = require("../lib/middlewares/tokenVerifier");
 const vendorController = require("../controllers/vendorController");
-const { authMiddleware } = require("../middlewares/authMiddleware");
+const {
+  authMiddleware,
+  requireRole,
+  optionalAuthMiddleware,
+} = require("../middlewares/authMiddleware");
+
+// Get all business profiles (admin only)
+router.get(
+  "/",
+  authMiddleware,
+  requireRole("admin"),
+  vendorController.getAllBusinessProfiles
+);
+
+// Get single business profile (public route with optional auth)
+router.get(
+  "/:id",
+  optionalAuthMiddleware,
+  vendorController.getBusinessProfileById
+);
+router.get(
+  "/:slug",
+  optionalAuthMiddleware,
+  vendorController.getBusinessProfileBySlug
+);
 
 // Create vendor profile (authenticated users)
-router.post("/", authMiddleware, vendorController.createVendor);
+router.post("/", authMiddleware, vendorController.createBusinessProfile);
 
 // Update vendor profile (owner)
 router.patch("/:id", authMiddleware, vendorController.updateVendor);
+
+router.delete(
+  "/:id",
+  authMiddleware,
+  vendorController.deactivateBusinessAccount
+);
 
 module.exports = router;

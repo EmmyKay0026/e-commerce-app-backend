@@ -3,14 +3,26 @@ const { z } = require("zod");
 
 // Schemas
 const productSchema = z.object({
-  name: z.string().min(1),
+  name: z.string(),
   description: z.string().optional(),
-  price: z.number().nonnegative(),
-  images: z.array(z.string()).optional(),
+  price: z.string(),
+  images: z.array(z.string()).min(1).optional(),
   categoryId: z.string().optional(),
   tags: z.array(z.string()).optional(),
-  condition: z.string().optional(),
+  metadata: z.any().optional(),
 });
+// metadata: z
+//   .record(
+//     z.union([
+//       z.string(),
+//       z.number(),
+//       z.boolean(),
+//       z.null(),
+//       z.array(z.any()),
+//       z.record(z.any()),
+//     ])
+//   )
+//   .optional(),
 
 // Helper: map query params to filters
 function buildFilters(query) {
@@ -34,7 +46,8 @@ function buildFilters(query) {
 exports.addProduct = async (req, res) => {
   // Only vendors can add products
   const user = req.user;
-  if (!user) return res.status(401).json({ message: "Unauthorized" });
+  if (!user)
+    return res.status(401).json({ success: false, message: "Unauthorized" });
 
   try {
     const parsed = productSchema.parse(req.body);
@@ -48,9 +61,10 @@ exports.addProduct = async (req, res) => {
       .single();
 
     if (vpErr || !vp) {
-      return res
-        .status(400)
-        .json({ message: "Vendor profile required to add products" });
+      return res.status(400).json({
+        success: false,
+        message: "Vendor profile required to add products",
+      });
     }
 
     const status = vp.status === "active" ? "active" : "pending";
@@ -67,19 +81,22 @@ exports.addProduct = async (req, res) => {
           images: parsed.images || [],
           category_id: parsed.categoryId || null,
           tags: parsed.tags || [],
-          condition: parsed.condition || null,
+          metadata: parsed.metadata || {},
           status,
         },
       ])
       .select()
       .single();
 
-    if (error) return res.status(500).json({ message: "Insert failed", error });
-    return res.status(201).json({ product: data });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Insert failed", error });
+    return res.status(201).json({ success: true, product: data });
   } catch (err) {
     return res
       .status(400)
-      .json({ message: "Invalid payload", error: err.message });
+      .json({ success: false, message: "Invalid payload", error: err.message });
   }
 };
 
@@ -93,7 +110,7 @@ exports.listProducts = async (req, res) => {
 
     let builder = supabase
       .from("products")
-      .select("*, vendor:product_owner_id(id, business_name, cover_image)")
+      .select("*, business:product_owner_id(id, business_name, cover_image)")
       .eq("status", "active");
 
     // Apply filters
@@ -125,7 +142,10 @@ exports.listProducts = async (req, res) => {
       .range(offset, offset + perPage - 1)
       .throwOnError();
 
-    if (error) return res.status(500).json({ message: "Query failed", error });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Query failed", error });
 
     return res.json({
       page,
@@ -136,43 +156,60 @@ exports.listProducts = async (req, res) => {
   } catch (err) {
     return res
       .status(500)
-      .json({ message: "Server error", error: err.message });
+      .json({ success: false, message: "Server error", error: err.message });
   }
 };
 
 exports.getProduct = async (req, res) => {
   const id = req.params.id;
+
   try {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, vendor:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone, business_whatsapp_number)"
+        "*, business:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone, business_whatsapp_number)"
       )
       .eq("id", id)
       .maybeSingle();
 
-    if (error) return res.status(500).json({ message: "Fetch failed", error });
-    if (!data) return res.status(404).json({ message: "Product not found" });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Fetch failed", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
 
     // Public-facing vendor preview: don't reveal contact fields
     const vendorPreview = {
-      id: data.vendor?.id,
-      businessName: data.vendor?.business_name,
-      profileImage: data.vendor?.profile_image,
-      address: data.vendor?.address
+      id: data.business?.id,
+      businessName: data.business?.business_name,
+      profileImage: data.business?.profile_image,
+      address: data.business?.address
         ? req.user
-          ? data.vendor.address
+          ? data.business.address
+          : null
+        : null,
+      businessPhoneNumber: data.business?.business_phone
+        ? req.user
+          ? data.business.business_phone
+          : null
+        : null,
+      businessWhatsAppNumber: data.business?.business_whatsapp_number
+        ? req.user
+          ? data.business.business_whatsapp_number
           : null
         : null,
     };
 
     // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
-    const product = { ...data, vendor: vendorPreview };
-    return res.json({ product });
+    const product = { ...data, business: vendorPreview };
+    return res.json({ success: true, product });
   } catch (err) {
     return res
       .status(500)
-      .json({ message: "Server error", error: err.message });
+      .json({ success: false, message: "Server error", error: err.message });
   }
 };
 
@@ -184,6 +221,26 @@ exports.updateProduct = async (req, res) => {
   try {
     const parsed = productSchema.partial().parse(req.body);
 
+    // Accept partial updates
+    const allowed = [
+      "name",
+      "description",
+      "price",
+      "images",
+      "categoryId",
+      "tags",
+      "metadata",
+    ];
+    const updates = {};
+    allowed.forEach((f) => {
+      if (req.body[f] !== undefined) updates[f] = req.body[f];
+    });
+
+    if (Object.keys(updates).length === 0)
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid fields to update" });
+
     // Ensure the product belongs to vendor owned by user
     const { data: prod, error: prodErr } = await supabase
       .from("products")
@@ -192,7 +249,9 @@ exports.updateProduct = async (req, res) => {
       .maybeSingle();
 
     if (prodErr || !prod)
-      return res.status(404).json({ message: "Product not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
 
     const { data: vp, error: vpErr } = await supabase
       .from("business_profile")
@@ -201,7 +260,7 @@ exports.updateProduct = async (req, res) => {
       .maybeSingle();
 
     if (vpErr || !vp || vp.owner_id !== user.id)
-      return res.status(403).json({ message: "Forbidden" });
+      return res.status(403).json({ success: false, message: "Forbidden" });
 
     const { data, error } = await supabase
       .from("products")
@@ -209,19 +268,23 @@ exports.updateProduct = async (req, res) => {
       .eq("id", id)
       .select()
       .maybeSingle();
-    if (error) return res.status(500).json({ message: "Update failed", error });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Update failed", error });
     return res.json({ product: data });
   } catch (err) {
     return res
       .status(400)
-      .json({ message: "Invalid payload", error: err.message });
+      .json({ success: false, message: "Invalid payload", error: err.message });
   }
 };
 
 exports.deleteProduct = async (req, res) => {
   const user = req.user;
   const id = req.params.id;
-  if (!user) return res.status(401).json({ message: "Unauthorized" });
+  if (!user)
+    return res.status(401).json({ success: false, message: "Unauthorized" });
 
   try {
     // Verify ownership
