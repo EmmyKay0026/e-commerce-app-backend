@@ -8,7 +8,21 @@ const {
 
 // Public: list and get
 router.get("/", categoryController.listCategories);
+// router.get("/sub-cats", categoryController.listCategories);
+router.get(
+  "/:id/with-child-cats",
+  categoryController.getCategoryWithChildCategories
+);
+router.get("/parent-cats", categoryController.listParentCategoriesOnly);
 router.get("/:id", categoryController.getCategory);
+router.get(
+  "/:id/with-parent-cats",
+  categoryController.getCategoryWithParentCategories
+);
+router.get(
+  "/:id/with-parent-child-cats",
+  categoryController.getCategoryWithParentChildCategories
+);
 
 // Protected: create, update, delete
 router.post(

@@ -42,6 +42,10 @@ exports.createBusinessProfile = async (req, res) => {
           address: payload.address,
           description: payload.description || null,
           status: "active",
+          slug: payload.business_name
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)+/g, ""),
         },
       ])
       .select()
@@ -104,6 +108,7 @@ exports.updateVendor = async (req, res) => {
       "address",
       "description",
       "status",
+      "slug",
     ];
     const updates = {};
     allowed.forEach((f) => {
