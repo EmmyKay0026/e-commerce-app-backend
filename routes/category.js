@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const categoryController = require("../controllers/category");
+const categoryController = require("../controllers/categoryController");
 const {
   authMiddleware,
   requireRole,
@@ -23,6 +23,9 @@ router.get(
   "/:id/with-parent-child-cats",
   categoryController.getCategoryWithParentChildCategories
 );
+
+// Get all product realated to a category
+router.get("/:id/products", categoryController.listProductsByCategory);
 
 // Protected: create, update, delete
 router.post(

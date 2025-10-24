@@ -1,6 +1,6 @@
 const { success } = require("zod");
 const { supabase } = require("../config/supabaseClient");
-const { logAdminActivity } = require("./adminLog");
+const { logAdminActivity } = require("./adminLogController");
 
 // User Management
 exports.listUsers = async (req, res) => {

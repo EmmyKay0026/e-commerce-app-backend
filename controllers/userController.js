@@ -122,35 +122,36 @@ exports.getUserProfile = async (req, res) => {
 
     const publicUser = {
       id: data.id,
-      firstName: data.first_name,
-      lastName: data.last_name,
-      profilePicture: data.profile_picture || null,
-      shopLink: data.shop_link || null,
-      profileLink: data.profile_link || null,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      profile_picture: data.profile_picture || null,
+      shop_link: data.shop_link || null,
+      profile_link: data.profile_link || null,
       role: data.role,
     };
 
     if (isAuthed) {
       publicUser.email = data.email || null;
-      publicUser.phone = data.phone_number || null;
-      publicUser.whatsapp = data.whatsapp_number || null;
+      publicUser.phone_number = data.phone_number || null;
+      publicUser.whatsapp_number = data.whatsapp_number || null;
     }
 
     if (data.business_profile) {
       const vp = data.business_profile;
       publicUser.business = {
         id: vp.id,
-        businessName: vp.business_name,
+        business_name: vp.business_name,
         profileImage: vp.profile_image || null,
         description: vp.description || null,
-        coverImage: vp.cover_image || null,
-        totalProducts: vp.total_products || 0,
+        cover_image: vp.cover_image || null,
+        total_products: vp.total_products || 0,
         rating: vp.rating || null,
       };
 
       if (isAuthed) {
-        publicUser.business.phone = vp.business_phone || null;
-        publicUser.business.whatsapp = vp.business_whatsapp_number || null;
+        publicUser.business.business_phone = vp.business_phone || null;
+        publicUser.business.business_whatsapp_number =
+          vp.business_whatsapp_number || null;
         publicUser.business.email = vp.business_email || null;
         publicUser.business.address = vp.address || null;
       }

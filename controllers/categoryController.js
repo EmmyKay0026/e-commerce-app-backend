@@ -1,3 +1,4 @@
+const e = require("express");
 const { supabase } = require("../config/supabaseClient");
 
 // Create category
@@ -299,6 +300,66 @@ exports.getCategoryWithParentChildCategories = async (req, res) => {
       const byId = new Map((parentCats || []).map((c) => [String(c.id), c]));
       data.child_categories = ids.map((id) => byId.get(String(id)) || null);
     }
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// Get all products related to a category
+exports.listProductsByCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+    const { data: catData, error: catError } = await supabase
+      .from("category")
+      .select("*")
+      .eq("id", id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (catError)
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch category",
+        error: catError,
+      });
+
+    // If category has no child categories, fetch products directly linked to it
+    // Otherwise, fetch products linked to its child categories
+    if (!catData.child_categories) {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("category_id", id)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + Number(limit) - 1);
+      if (error)
+        return res
+          .status(500)
+          .json({ success: false, message: "Failed to fetch products", error });
+      return res.json({ success: true, products: data });
+    }
+    // Fetch products linked to child categories
+
+    const childCategoryIds = catData.child_categories;
+
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .in("category_id", childCategoryIds)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + Number(limit) - 1);
+
+    if (error) {
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch products", error });
+    }
+
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: "Server error" });

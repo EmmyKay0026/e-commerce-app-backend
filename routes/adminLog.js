@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const adminLogController = require("../controllers/adminLog");
+const adminLogController = require("../controllers/adminLogController");
 // const {
 //   adminAuthMiddleware,
 //   requirePermission,

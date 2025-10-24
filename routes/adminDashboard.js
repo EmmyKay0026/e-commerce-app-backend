@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const adminDashboard = require("../controllers/adminDashboard");
+const adminDashboard = require("../controllers/adminDashboardController");
 const {
   requireRole,
   authMiddleware,
