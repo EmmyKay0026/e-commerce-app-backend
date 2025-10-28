@@ -160,6 +160,7 @@ exports.listProducts = async (req, res) => {
   }
 };
 
+// Get single product details
 exports.getProduct = async (req, res) => {
   const id = req.params.id;
 
@@ -206,6 +207,30 @@ exports.getProduct = async (req, res) => {
     // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
     const product = { ...data, business: vendorPreview };
     return res.json({ success: true, product });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+exports.listProductsByVendor = async (req, res) => {
+  const businessId = req.params.businessId;
+
+  // console.log(businessId);
+
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("product_owner_id", businessId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Query failed", error });
+    return res.json({ success: true, data: data || [] });
   } catch (err) {
     return res
       .status(500)

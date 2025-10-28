@@ -16,11 +16,11 @@ router.get(
 );
 
 // Get single business profile (public route with optional auth)
-router.get(
-  "/:id",
-  optionalAuthMiddleware,
-  vendorController.getBusinessProfileById
-);
+// router.get(
+//   "/:id",
+//   optionalAuthMiddleware,
+//   vendorController.getBusinessProfileById
+// );
 router.get(
   "/:slug",
   optionalAuthMiddleware,

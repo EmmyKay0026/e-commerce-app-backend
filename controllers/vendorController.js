@@ -219,6 +219,7 @@ exports.getBusinessProfileBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
     const isAuthenticated = req.user; // Check if user is authenticated
+    // console.log(isAuthenticated);
 
     // Base query to get business profile
     const { data: profile, error } = await supabase
@@ -232,7 +233,8 @@ exports.getBusinessProfileBySlug = async (req, res) => {
           last_name,
           email,
           phone_number,
-          whatsapp_number
+          whatsapp_number,
+          profile_picture
         )
       `
       )

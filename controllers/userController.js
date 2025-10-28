@@ -118,7 +118,7 @@ exports.getUserProfile = async (req, res) => {
         .status(404)
         .json({ success: false, message: "User not found." });
 
-    const isAuthed = req.user && req.user.id === data.id;
+    const isAuthed = req.user;
 
     const publicUser = {
       id: data.id,
@@ -129,19 +129,22 @@ exports.getUserProfile = async (req, res) => {
       profile_link: data.profile_link || null,
       role: data.role,
     };
+    // console.log(data);
 
     if (isAuthed) {
+      // console.log("is auth");
       publicUser.email = data.email || null;
       publicUser.phone_number = data.phone_number || null;
       publicUser.whatsapp_number = data.whatsapp_number || null;
     }
 
-    if (data.business_profile) {
+    if (data.role == "vendor" && data.business_profile) {
       const vp = data.business_profile;
-      publicUser.business = {
+      // console.log("Vendor profile", vp);
+
+      publicUser.business_profile = {
         id: vp.id,
         business_name: vp.business_name,
-        profileImage: vp.profile_image || null,
         description: vp.description || null,
         cover_image: vp.cover_image || null,
         total_products: vp.total_products || 0,
@@ -149,15 +152,17 @@ exports.getUserProfile = async (req, res) => {
       };
 
       if (isAuthed) {
-        publicUser.business.business_phone = vp.business_phone || null;
-        publicUser.business.business_whatsapp_number =
+        console.log("business_profile ran");
+
+        publicUser.business_profile.business_phone = vp.business_phone || null;
+        publicUser.business_profile.business_whatsapp_number =
           vp.business_whatsapp_number || null;
-        publicUser.business.email = vp.business_email || null;
-        publicUser.business.address = vp.address || null;
+        publicUser.business_profile.email = vp.business_email || null;
+        publicUser.business_profile.address = vp.address || null;
       }
     }
 
-    return res.json({ success: true, publicUser });
+    return res.json({ success: true, data: publicUser });
   } catch (err) {
     return res.status(500).json({ success: false, message: "Server error." });
   }
