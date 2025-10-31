@@ -5,7 +5,7 @@ async function fetchUserWithVendor(userId) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, first_name, last_name, email, phone_number, whatsapp_number, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, rating)"
+      "id, first_name, last_name, email, phone_number, whatsapp_number,saved_items, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, rating)"
     )
     .eq("id", userId)
     .maybeSingle();
@@ -76,6 +76,94 @@ exports.updateMe = async (req, res) => {
 
     return res.json({ success: true, data });
   } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+
+exports.updateSavedItems = async (req, res) => {
+  try {
+    const userId = req.user && req.user.id;
+    const { productId } = req.body;
+
+    if (!userId)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+
+    if (!productId)
+      return res
+        .status(400)
+        .json({ success: false, message: "productId is required" });
+
+    // Fetch current user's saved_items
+    const { data: currentUser, error: userError } = await supabase
+      .from("users")
+      .select("id, saved_items")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (userError) {
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error: userError });
+    }
+    if (!currentUser) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
+    }
+
+    const existing = Array.isArray(currentUser.saved_items)
+      ? currentUser.saved_items
+      : [];
+
+    // Determine whether saved_items contains objects with `id` or plain ids
+    const containsObjects =
+      existing.length > 0 &&
+      typeof existing[0] === "object" &&
+      existing[0] !== null &&
+      "id" in existing[0];
+
+    let newSavedItems;
+    if (containsObjects) {
+      const exists = existing.some((p) => String(p.id) === String(productId));
+      if (exists) {
+        // remove
+        newSavedItems = existing.filter(
+          (p) => String(p.id) !== String(productId)
+        );
+      } else {
+        // add with timestamp
+        newSavedItems = [
+          ...existing,
+          { id: String(productId), saved_at: new Date().toISOString() },
+        ];
+      }
+    } else {
+      // array of primitive ids
+      const exists = existing.map(String).includes(String(productId));
+      if (exists) {
+        newSavedItems = existing
+          .map(String)
+          .filter((p) => p !== String(productId));
+      } else {
+        newSavedItems = [...existing.map(String), String(productId)];
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("users")
+      .update({ saved_items: newSavedItems })
+      .eq("id", userId)
+      .select()
+      .maybeSingle();
+
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error("updateSavedItems error:", err);
     return res.status(500).json({ success: false, message: "Server error." });
   }
 };
@@ -152,7 +240,7 @@ exports.getUserProfile = async (req, res) => {
       };
 
       if (isAuthed) {
-        console.log("business_profile ran");
+        // console.log("business_profile ran");
 
         publicUser.business_profile.business_phone = vp.business_phone || null;
         publicUser.business_profile.business_whatsapp_number =

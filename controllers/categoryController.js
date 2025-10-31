@@ -340,11 +340,11 @@ exports.listProductsByCategory = async (req, res) => {
         return res
           .status(500)
           .json({ success: false, message: "Failed to fetch products", error });
-      return res.json({ success: true, products: data });
+      return res.json({ success: true, data });
     }
     // Fetch products linked to child categories
 
-    const childCategoryIds = catData.child_categories;
+    const childCategoryIds = [id, ...catData.child_categories];
 
     const { data, error } = await supabase
       .from("products")

@@ -168,7 +168,7 @@ exports.getProduct = async (req, res) => {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, business:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone, business_whatsapp_number)"
+        "*, business:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone,slug, business_whatsapp_number)"
       )
       .eq("id", id)
       .maybeSingle();
@@ -185,19 +185,21 @@ exports.getProduct = async (req, res) => {
     // Public-facing vendor preview: don't reveal contact fields
     const vendorPreview = {
       id: data.business?.id,
-      businessName: data.business?.business_name,
-      profileImage: data.business?.profile_image,
+      business_name: data.business?.business_name,
+      description: data.business.description,
+      cover_image: data.business?.cover_image,
+      slug: data.business?.slug,
       address: data.business?.address
         ? req.user
           ? data.business.address
           : null
         : null,
-      businessPhoneNumber: data.business?.business_phone
+      business_phone: data.business?.business_phone
         ? req.user
           ? data.business.business_phone
           : null
         : null,
-      businessWhatsAppNumber: data.business?.business_whatsapp_number
+      business_whatsApp_number: data.business?.business_whatsapp_number
         ? req.user
           ? data.business.business_whatsapp_number
           : null

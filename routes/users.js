@@ -11,6 +11,7 @@ const {
 // All routes require authentication
 router.get("/me", authMiddleware, userController.getMe);
 router.patch("/me", authMiddleware, userController.updateMe);
+router.patch("/me/saved", authMiddleware, userController.updateSavedItems);
 router.delete("/me", authMiddleware, userController.deactivateMe);
 
 // Public profile endpoint; controller will include contact details only when requester is authenticated

@@ -3,14 +3,20 @@ const { supabase } = require("../config/supabaseClient");
 
 const vendorSchema = z.object({
   business_name: z.string(),
-  business_email: z.email(),
-  business_phone: z.string(),
-  business_whatsapp_number: z.string().min(4),
+
   cover_image: z.string().optional(),
-  address: z.string().min(1),
   description: z.string().optional(),
   status: z.string().optional(),
 });
+
+//  business_email: z.email(),
+//   business_phone: z.string(),
+//   business_whatsapp_number: z.string().min(4),
+// address: z.string().min(1),
+// business_email: payload.business_email || null,
+//         business_phone: payload.business_phone || null,
+//         business_whatsapp_number: payload.whatsAppNumber,
+//         address: payload.address,
 
 // Renamed the function to be more general
 exports.createBusinessProfile = async (req, res) => {
@@ -29,17 +35,14 @@ exports.createBusinessProfile = async (req, res) => {
 
     // I. Insert new business profile row
     const { data: businessProfile, error: bpErr } = await supabase
-      .from("business_profile") // Renamed for clarity, verify your table name
+      .from("business_profile")
       .insert([
         {
           // 💡 CRUCIAL CHANGE: Use the received userId instead of req.user.id
           owner_id: userId,
           business_name: payload.business_name,
-          business_email: payload.business_email || null,
-          business_phone: payload.business_phone || null,
-          business_whatsapp_number: payload.whatsAppNumber,
+
           cover_image: payload.cover_image || null,
-          address: payload.address,
           description: payload.description || null,
           status: "active",
           slug: payload.business_name
@@ -71,9 +74,10 @@ exports.createBusinessProfile = async (req, res) => {
     return res.status(201).json({ success: true, businessProfile });
   } catch (err) {
     // Catches validation errors from vendorSchema.parse(req.body)
-    return res
-      .status(400)
-      .json({ message: "Invalid payload or server error", error: err.message });
+    return res.status(400).json({
+      message: "Invalid payload or server error",
+      error: err.message,
+    });
   }
 };
 
@@ -219,7 +223,7 @@ exports.getBusinessProfileBySlug = async (req, res) => {
   try {
     const { slug } = req.params;
     const isAuthenticated = req.user; // Check if user is authenticated
-    // console.log(isAuthenticated);
+    // console.log(slug);
 
     // Base query to get business profile
     const { data: profile, error } = await supabase
