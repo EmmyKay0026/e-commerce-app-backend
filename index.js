@@ -5,6 +5,7 @@ const userRoutes = require("./routes/users");
 const vendorRoutes = require("./routes/vendors");
 const categoryRoutes = require("./routes/category");
 const adminLogRoutes = require("./routes/adminLog");
+const locationRoutes = require("./routes/location");
 const adminDashboardRoutes = require("./routes/adminDashboard");
 require("dotenv").config();
 
@@ -57,6 +58,12 @@ app.use("/api/businessProfile", vendorRoutes);
 
 // Category routes
 app.use("/api/categories", categoryRoutes);
+
+// Location routes
+
+app.use("/api/location", locationRoutes);
+
+//Image upload route
 
 // Admin routes (separate authentication)
 app.use("/api/admin/logs", adminLogRoutes);

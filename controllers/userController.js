@@ -5,7 +5,7 @@ async function fetchUserWithVendor(userId) {
   const { data, error } = await supabase
     .from("users")
     .select(
-      "id, first_name, last_name, email, phone_number, whatsapp_number,saved_items, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, rating)"
+      "id, first_name, last_name, email, phone_number, whatsapp_number,saved_items, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, slug)"
     )
     .eq("id", userId)
     .maybeSingle();
@@ -237,6 +237,7 @@ exports.getUserProfile = async (req, res) => {
         cover_image: vp.cover_image || null,
         total_products: vp.total_products || 0,
         rating: vp.rating || null,
+        slug: vp.slug,
       };
 
       if (isAuthed) {

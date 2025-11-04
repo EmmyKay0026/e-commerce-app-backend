@@ -7,8 +7,8 @@ const productSchema = z.object({
   description: z.string().optional(),
   price: z.string(),
   images: z.array(z.string()).min(1).optional(),
-  categoryId: z.string().optional(),
-  tags: z.array(z.string()).optional(),
+  category_id: z.string().optional(),
+  location: z.string(),
   metadata: z.any().optional(),
 });
 // metadata: z
@@ -51,6 +51,51 @@ exports.addProduct = async (req, res) => {
 
   try {
     const parsed = productSchema.parse(req.body);
+    // console.log(parsed);
+
+    // Normalize features: accept "a|b|c" or array
+    let featuresArr = [];
+    if (req.body.features !== undefined && req.body.features !== null) {
+      if (Array.isArray(req.body.features)) {
+        featuresArr = req.body.features
+          .map((f) => (typeof f === "string" ? f.trim() : f))
+          .filter(Boolean);
+      } else if (typeof req.body.features === "string") {
+        featuresArr = req.body.features
+          .split("|")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid features format" });
+      }
+    }
+
+    // Validate enums
+    const priceType = req.body.price_type;
+    const saleType = req.body.sale_type;
+    const validPriceTypes = ["fixed", "negotiable"];
+    const validSaleTypes = ["wholesale", "retail"];
+
+    if (
+      priceType !== undefined &&
+      priceType !== null &&
+      !validPriceTypes.includes(priceType)
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid price_type" });
+    }
+    if (
+      saleType !== undefined &&
+      saleType !== null &&
+      !validSaleTypes.includes(saleType)
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid price_negotiable" });
+    }
 
     // Check vendor profile - simplistic: we expect a vendor_profile record linked to user
     const { data: vp, error: vpErr } = await supabase
@@ -69,22 +114,25 @@ exports.addProduct = async (req, res) => {
 
     const status = vp.status === "active" ? "active" : "pending";
 
-    // Any authenticated user can add products, but must have vendor profile
+    // Build insert payload
+    const payload = {
+      product_owner_id: vp.id, // business_profile id
+      name: parsed.name,
+      description: parsed.description || null,
+      price: parsed.price,
+      images: parsed.images || [],
+      category_id: parsed.category_id || null,
+      tags: parsed.tags || [],
+      metadata: parsed.metadata || {},
+      status,
+      features: featuresArr,
+      price_type: priceType || null,
+      sale_type: saleType || null,
+    };
+
     const { data, error } = await supabase
       .from("products")
-      .insert([
-        {
-          product_owner_id: vp.id, //business_profile id
-          name: parsed.name,
-          description: parsed.description || null,
-          price: parsed.price,
-          images: parsed.images || [],
-          category_id: parsed.categoryId || null,
-          tags: parsed.tags || [],
-          metadata: parsed.metadata || {},
-          status,
-        },
-      ])
+      .insert(payload)
       .select()
       .single();
 
