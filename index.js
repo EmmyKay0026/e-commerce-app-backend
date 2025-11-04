@@ -18,10 +18,10 @@ const corsOptions = {
     const allowedOrigins = [
       "http://localhost:3000",
       "https://e-commerce-app-frontend-taupe.vercel.app",
-      "http://industrialmart.ng/",
-      "http://www.industrialmart.ng/",
-      "https://www.industrialmart.ng/",
-      "https://industrialmart.ng/",
+      "http://industrialmart.ng",
+      "http://www.industrialmart.ng",
+      "https://www.industrialmart.ng",
+      "https://industrialmart.ng",
     ];
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, origin);
