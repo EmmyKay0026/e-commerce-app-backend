@@ -6,7 +6,9 @@ const vendorRoutes = require("./routes/vendors");
 const categoryRoutes = require("./routes/category");
 const adminLogRoutes = require("./routes/adminLog");
 const locationRoutes = require("./routes/location");
+const fileUploadRoute = require("./routes/fileUpload");
 const adminDashboardRoutes = require("./routes/adminDashboard");
+
 require("dotenv").config();
 
 const app = express();
@@ -16,6 +18,10 @@ const corsOptions = {
     const allowedOrigins = [
       "http://localhost:3000",
       "https://e-commerce-app-frontend-taupe.vercel.app",
+      "http://industrialmart.ng/",
+      "http://www.industrialmart.ng/",
+      "https://www.industrialmart.ng/",
+      "https://industrialmart.ng/",
     ];
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, origin);
@@ -41,11 +47,6 @@ app.use(cors(corsOptions));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
-// Simple route
-app.get("/", (req, res) => {
-  res.send("API is running");
-});
-
 // Product routes
 app.use("/api/products", productRoutes);
 
@@ -64,11 +65,16 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/location", locationRoutes);
 
 //Image upload route
+app.use("/api/upload", fileUploadRoute);
 
 // Admin routes (separate authentication)
 app.use("/api/admin/logs", adminLogRoutes);
 app.use("/api/admin/dashboard", adminDashboardRoutes);
 
+// Simple route
+app.get("/", (req, res) => {
+  res.send("API is running");
+});
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
