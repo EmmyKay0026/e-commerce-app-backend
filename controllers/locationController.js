@@ -3,7 +3,10 @@ const { supabase } = require("../config/supabaseClient");
 // List all states
 exports.listStates = async (req, res) => {
   try {
-    const { data, error } = await supabase.from("state_location").select("*");
+    const { data, error } = await supabase
+      .from("state_location")
+      .select("*")
+      .order("name", { ascending: true });
     if (error) {
       return res
         .status(500)
@@ -22,7 +25,8 @@ exports.listLgas = async (req, res) => {
     const { data, error } = await supabase
       .from("lga_location")
       .select("*")
-      .eq("state_id", state_id);
+      .eq("state_id", state_id)
+      .order("name", { ascending: true });
     if (error) {
       return res
         .status(500)
@@ -42,6 +46,7 @@ exports.getState = async (req, res) => {
       .from("state_location")
       .select("*")
       .eq("state_id", id)
+
       .single();
     if (error) {
       return res
@@ -121,12 +126,15 @@ exports.listStatesWithLgas = async (req, res) => {
   try {
     const { data: states, error: statesError } = await supabase
       .from("state_location")
-      .select("*, lgas:lga_location(*)");
+      .select("*, lgas:lga_location(*)")
+      .order("name", { ascending: true });
 
     if (statesError) {
-      return res
-        .status(500)
-        .json({ success: false, message: "Failed to fetch data", error: statesError });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch data",
+        error: statesError,
+      });
     }
 
     return res.json({ success: true, data: states });

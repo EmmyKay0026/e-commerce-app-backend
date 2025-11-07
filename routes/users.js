@@ -14,6 +14,8 @@ router.patch("/me", authMiddleware, userController.updateMe);
 router.patch("/me/saved", authMiddleware, userController.updateSavedItems);
 router.delete("/me", authMiddleware, userController.deactivateMe);
 
+router.get("/profile/:slug", optionalAuthMiddleware, userController.getUserProfileBySlug);
+
 // Public profile endpoint; controller will include contact details only when requester is authenticated
 router.get("/:userId", optionalAuthMiddleware, userController.getUserProfile);
 

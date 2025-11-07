@@ -1,6 +1,30 @@
 const { supabase } = require("../config/supabaseClient");
 
 // Helper: fetch user row and optional vendor join
+async function fetchUserByBusinessSlug(slug) {
+  const { data: businessProfile, error: bpError } = await supabase
+    .from("business_profile")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (bpError) return { data: null, error: bpError };
+  if (!businessProfile)
+    return { data: null, error: { message: "Business profile not found" } };
+
+  const businessProfileId = businessProfile.id;
+
+  const { data, error } = await supabase
+    .from("users")
+    .select(
+      "id, first_name, last_name, email, phone_number, whatsapp_number,saved_items, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, slug)"
+    )
+    .eq("business_profile_id", businessProfileId)
+    .maybeSingle();
+
+  return { data, error };
+}
+
 async function fetchUserWithVendor(userId) {
   const { data, error } = await supabase
     .from("users")
@@ -8,6 +32,18 @@ async function fetchUserWithVendor(userId) {
       "id, first_name, last_name, email, phone_number, whatsapp_number,saved_items, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, slug)"
     )
     .eq("id", userId)
+    .maybeSingle();
+
+  return { data, error };
+}
+
+async function fetchUserWithVendorWithSlug(slug) {
+  const { data, error } = await supabase
+    .from("users")
+    .select(
+      "id, first_name, last_name, email, phone_number, whatsapp_number,saved_items, profile_picture, shop_link, profile_link, role, business_profile_id, business_profile:business_profile_id (id, business_name, cover_image, address, description, cover_image, business_phone, business_whatsapp_number, business_email, total_products, slug)"
+    )
+    .eq("profile_link", slug)
     .maybeSingle();
 
   return { data, error };
@@ -243,6 +279,134 @@ exports.getUserProfile = async (req, res) => {
       if (isAuthed) {
         // console.log("business_profile ran");
 
+        publicUser.business_profile.business_phone = vp.business_phone || null;
+        publicUser.business_profile.business_whatsapp_number =
+          vp.business_whatsapp_number || null;
+        publicUser.business_profile.email = vp.business_email || null;
+        publicUser.business_profile.address = vp.address || null;
+      }
+    }
+
+    return res.json({ success: true, data: publicUser });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+
+exports.getUserProfileBySlug = async (req, res) => {
+  const slug = req.params.slug;
+  try {
+    const { data, error } = await fetchUserWithVendorWithSlug(slug);
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
+
+    const isAuthed = req.user;
+
+    const publicUser = {
+      id: data.id,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      profile_picture: data.profile_picture || null,
+      shop_link: data.shop_link || null,
+      profile_link: data.profile_link || null,
+      role: data.role,
+    };
+    // console.log(data);
+
+    if (isAuthed) {
+      // console.log("is auth");
+      publicUser.email = data.email || null;
+      publicUser.phone_number = data.phone_number || null;
+      publicUser.whatsapp_number = data.whatsapp_number || null;
+    }
+
+    if (data.role == "vendor" && data.business_profile) {
+      const vp = data.business_profile;
+      // console.log("Vendor profile", vp);
+
+      publicUser.business_profile = {
+        id: vp.id,
+        business_name: vp.business_name,
+        description: vp.description || null,
+        cover_image: vp.cover_image || null,
+        total_products: vp.total_products || 0,
+        rating: vp.rating || null,
+        slug: vp.slug,
+      };
+
+      if (isAuthed) {
+        // console.log("business_profile ran");
+
+        publicUser.business_profile.business_phone = vp.business_phone || null;
+        publicUser.business_profile.business_whatsapp_number =
+          vp.business_whatsapp_number || null;
+        publicUser.business_profile.email = vp.business_email || null;
+        publicUser.business_profile.address = vp.address || null;
+      }
+    }
+
+    return res.json({ success: true, data: publicUser });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error." });
+  }
+};
+
+exports.getUserProfileBySlugs = async (req, res) => {
+  const { slug } = req.params;
+  try {
+    const { data, error } = await fetchUserByBusinessSlug(slug);
+    if (error && error.message === "Business profile not found") {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
+    }
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error.", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found." });
+
+    const isAuthed = req.user;
+
+    const publicUser = {
+      id: data.id,
+      first_name: data.first_name,
+      last_name: data.last_name,
+      profile_picture: data.profile_picture || null,
+      shop_link: data.shop_link || null,
+      profile_link: data.profile_link || null,
+      role: data.role,
+    };
+
+    if (isAuthed) {
+      publicUser.email = data.email || null;
+      publicUser.phone_number = data.phone_number || null;
+      publicUser.whatsapp_number = data.whatsapp_number || null;
+    }
+
+    if (data.role == "vendor" && data.business_profile) {
+      const vp = data.business_profile;
+
+      publicUser.business_profile = {
+        id: vp.id,
+        business_name: vp.business_name,
+        description: vp.description || null,
+        cover_image: vp.cover_image || null,
+        total_products: vp.total_products || 0,
+        rating: vp.rating || null,
+        slug: vp.slug,
+      };
+
+      if (isAuthed) {
         publicUser.business_profile.business_phone = vp.business_phone || null;
         publicUser.business_profile.business_whatsapp_number =
           vp.business_whatsapp_number || null;

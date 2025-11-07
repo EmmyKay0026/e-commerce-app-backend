@@ -31,6 +31,9 @@ router.get(
 router.post("/", authMiddleware, vendorController.createBusinessProfile);
 
 // Update vendor profile (owner)
+router.patch("/me", authMiddleware, vendorController.updateMyBusinessProfile);
+
+//TO be moved to admin routes
 router.patch("/:id", authMiddleware, vendorController.updateVendor);
 
 router.delete(

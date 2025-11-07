@@ -2,6 +2,8 @@ const { supabase } = require("../config/supabaseClient");
 
 exports.authMiddleware = async (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
+  // console.log(token);
+
   if (!token) return res.status(401).json({ message: "Unauthorized" });
 
   const { data: user, error } = await supabase.auth.getUser(token);

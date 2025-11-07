@@ -1,12 +1,18 @@
-const { z, success } = require("zod");
+const { z } = require("zod");
 const { supabase } = require("../config/supabaseClient");
 
 const vendorSchema = z.object({
   business_name: z.string(),
+  slug: z.string().optional(),
 
-  cover_image: z.string().optional(),
-  description: z.string().optional(),
-  status: z.string().optional(),
+  cover_image: z.string().min(1, "Cover image URL is required").url(),
+  description: z.string().min(10),
+  business_address: z.string().optional(),
+  phone_number: z.string().min(11, "Phone number must be at least 11 digits"),
+  whatsapp_number: z
+    .string()
+    .min(11, "WhatsApp number must be at least 11 digits"),
+  // status: z.string().optional(),
 });
 
 //  business_email: z.email(),
@@ -34,6 +40,41 @@ exports.createBusinessProfile = async (req, res) => {
     const payload = vendorSchema.parse(req.body);
 
     // I. Insert new business profile row
+
+    // Generate a unique slug
+    let slug = payload.slug
+      ? payload.slug
+      : payload.business_name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)+/g, "");
+    let slugExists = true;
+    while (slugExists) {
+      const { data: productData, error: productError } = await supabase
+        .from("products")
+        .select("slug")
+        .eq("slug", slug);
+
+      if (productError) {
+        throw productError;
+      }
+
+      const { data: businessData, error: businessError } = await supabase
+        .from("business_profile")
+        .select("slug")
+        .eq("slug", slug);
+
+      if (businessError) {
+        throw businessError;
+      }
+
+      if (productData.length === 0 && businessData.length === 0) {
+        slugExists = false;
+      } else {
+        slug = `${slug}-${Math.random().toString(36).substring(2, 8)}`;
+      }
+    }
+
     const { data: businessProfile, error: bpErr } = await supabase
       .from("business_profile")
       .insert([
@@ -41,14 +82,11 @@ exports.createBusinessProfile = async (req, res) => {
           // 💡 CRUCIAL CHANGE: Use the received userId instead of req.user.id
           owner_id: userId,
           business_name: payload.business_name,
-
           cover_image: payload.cover_image || null,
           description: payload.description || null,
           status: "active",
-          slug: payload.business_name
-            .toLowerCase()
-            .replace(/[^a-z0-9]+/g, "-")
-            .replace(/(^-|-$)+/g, ""),
+          slug: slug,
+          address: payload.business_address || null,
         },
       ])
       .select()
@@ -68,6 +106,8 @@ exports.createBusinessProfile = async (req, res) => {
       .update({
         business_profile_id: businessProfile.id,
         role: "vendor", // Assuming this function is exclusively for vendors
+        phone_number: payload.phone_number || null,
+        whatsapp_number: payload.whatsapp_number || null,
       })
       .eq("id", userId); // Use the same received userId to update the correct user
 
@@ -124,10 +164,140 @@ exports.updateVendor = async (req, res) => {
         .status(400)
         .json({ success: false, message: "No valid fields to update" });
 
+    if (updates.business_name) {
+      updates.slug = updates.business_name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)+/g, "");
+      let slugExists = true;
+      while (slugExists) {
+        const { data: productData, error: productError } = await supabase
+          .from("products")
+          .select("slug")
+          .eq("slug", updates.slug);
+
+        if (productError) {
+          throw productError;
+        }
+
+        const { data: businessData, error: businessError } = await supabase
+          .from("business_profile")
+          .select("slug")
+          .eq("slug", updates.slug)
+          .not("id", "eq", id);
+
+        if (businessError) {
+          throw businessError;
+        }
+
+        if (productData.length === 0 && businessData.length === 0) {
+          slugExists = false;
+        } else {
+          updates.slug = `${updates.slug}-${Math.random()
+            .toString(36)
+            .substring(2, 8)}`;
+        }
+      }
+    }
+
     const { data: vendor, error } = await supabase
       .from("business_profile")
       .update(updates)
       .eq("id", id)
+      .select()
+      .maybeSingle();
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Update failed", error });
+    return res.json({ success: true, vendor });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+exports.updateMyBusinessProfile = async (req, res) => {
+  const user = req.user;
+  if (!user)
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+
+  try {
+    // Ensure the vendor exists and belongs to user
+    const { data: existing } = await supabase
+      .from("business_profile")
+      .select("*")
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    if (!existing)
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor profile not found for this user" });
+
+    // Accept partial updates
+    const allowed = [
+      "business_name",
+      "business_email",
+      "business_phone",
+      "whats_app_number",
+      "cover_image",
+      "profile_image",
+      "address",
+      "description",
+      "status",
+      "slug",
+    ];
+    const updates = {};
+    allowed.forEach((f) => {
+      if (req.body[f] !== undefined) updates[f] = req.body[f];
+    });
+
+    if (Object.keys(updates).length === 0)
+      return res
+        .status(400)
+        .json({ success: false, message: "No valid fields to update" });
+
+    if (updates.business_name) {
+      updates.slug = updates.business_name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)+/g, "");
+      let slugExists = true;
+      while (slugExists) {
+        const { data: productData, error: productError } = await supabase
+          .from("products")
+          .select("slug")
+          .eq("slug", updates.slug);
+
+        if (productError) {
+          throw productError;
+        }
+
+        const { data: businessData, error: businessError } = await supabase
+          .from("business_profile")
+          .select("slug")
+          .eq("slug", updates.slug)
+          .not("owner_id", "eq", user.id); // Ensure slug is unique for other business profiles
+
+        if (businessError) {
+          throw businessError;
+        }
+
+        if (productData.length === 0 && businessData.length === 0) {
+          slugExists = false;
+        } else {
+          updates.slug = `${updates.slug}-${Math.random()
+            .toString(36)
+            .substring(2, 8)}`;
+        }
+      }
+    }
+
+    const { data: vendor, error } = await supabase
+      .from("business_profile")
+      .update(updates)
+      .eq("owner_id", user.id)
       .select()
       .maybeSingle();
     if (error)
@@ -155,6 +325,7 @@ exports.getBusinessProfileById = async (req, res) => {
         *,
         user:owner_id (
           id,
+          profile_link,
           first_name,
           last_name,
           email,
@@ -191,6 +362,7 @@ exports.getBusinessProfileById = async (req, res) => {
         business_whatsapp_number: undefined,
         user: {
           id: profile.user.id,
+          profile_link: profile.user.profile_link,
           first_name: profile.user.first_name,
           last_name: profile.user.last_name,
           email: undefined,
@@ -233,6 +405,7 @@ exports.getBusinessProfileBySlug = async (req, res) => {
         *,
         user:owner_id (
           id,
+          profile_link,
           first_name,
           last_name,
           email,
@@ -270,6 +443,7 @@ exports.getBusinessProfileBySlug = async (req, res) => {
         business_whatsapp_number: undefined,
         user: {
           id: profile.user.id,
+          profile_link: profile.user.profile_link,
           first_name: profile.user.first_name,
           last_name: profile.user.last_name,
           email: undefined,
@@ -308,6 +482,7 @@ exports.getAllBusinessProfiles = async (req, res) => {
         *,
         users:owner_id (
           id,
+          profile_link,
           email,
           first_name,
           last_name,

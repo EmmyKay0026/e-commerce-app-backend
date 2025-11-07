@@ -8,6 +8,7 @@ const adminLogRoutes = require("./routes/adminLog");
 const locationRoutes = require("./routes/location");
 const fileUploadRoute = require("./routes/fileUpload");
 const adminDashboardRoutes = require("./routes/adminDashboard");
+const slugRoutes = require("./routes/slug");
 
 require("dotenv").config();
 
@@ -65,11 +66,14 @@ app.use("/api/categories", categoryRoutes);
 app.use("/api/location", locationRoutes);
 
 //Image upload route
-app.use("/api/upload", fileUploadRoute);
+app.use("/api/uploads", fileUploadRoute);
 
 // Admin routes (separate authentication)
 app.use("/api/admin/logs", adminLogRoutes);
 app.use("/api/admin/dashboard", adminDashboardRoutes);
+
+// Slug routes
+app.use("/api/slug", slugRoutes);
 
 // Simple route
 app.get("/", (req, res) => {

@@ -1,14 +1,17 @@
 const { supabase } = require("../config/supabaseClient");
 const { z } = require("zod");
+const generateSlug = require("../lib/slugGenerator");
 
 // Schemas
 const productSchema = z.object({
   name: z.string(),
+  slug: z.string().optional(),
   description: z.string().optional(),
   price: z.string(),
-  images: z.array(z.string()).min(1).optional(),
+  images: z.array(z.string()).min(3).optional(),
   category_id: z.string().optional(),
-  location: z.string(),
+  location_state: z.string(),
+  location_lga: z.string(),
   metadata: z.any().optional(),
 });
 // metadata: z
@@ -75,13 +78,24 @@ exports.addProduct = async (req, res) => {
     // Validate enums
     const priceType = req.body.price_type;
     const saleType = req.body.sale_type;
+    const priceInputMode = req.body.price_input_mode;
     const validPriceTypes = ["fixed", "negotiable"];
     const validSaleTypes = ["wholesale", "retail"];
+    const validPriceInputMode = ["enter", "quote"];
 
     if (
       priceType !== undefined &&
       priceType !== null &&
       !validPriceTypes.includes(priceType)
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid price_type" });
+    }
+    if (
+      priceInputMode !== undefined &&
+      priceInputMode !== null &&
+      !validPriceInputMode.includes(priceInputMode)
     ) {
       return res
         .status(400)
@@ -108,23 +122,55 @@ exports.addProduct = async (req, res) => {
     if (vpErr || !vp) {
       return res.status(400).json({
         success: false,
-        message: "Vendor profile required to add products",
+        message: "Business account is required to add products",
       });
     }
 
-    const status = vp.status === "active" ? "active" : "pending";
+    const status = vp.status === "active" ? "active" : "pending_review";
+
+    // Generate a unique slug
+    let slug = generateSlug(parsed.name);
+    let slugExists = true;
+    while (slugExists) {
+      const { data: productData, error: productError } = await supabase
+        .from("products")
+        .select("slug")
+        .eq("slug", slug);
+
+      if (productError) {
+        throw productError;
+      }
+
+      const { data: businessData, error: businessError } = await supabase
+        .from("business_profile")
+        .select("slug")
+        .eq("slug", slug);
+
+      if (businessError) {
+        throw businessError;
+      }
+
+      if (productData.length === 0 && businessData.length === 0) {
+        slugExists = false;
+      } else {
+        slug = generateSlug(parsed.name);
+      }
+    }
 
     // Build insert payload
     const payload = {
       product_owner_id: vp.id, // business_profile id
       name: parsed.name,
+      slug: slug,
       description: parsed.description || null,
       price: parsed.price,
       images: parsed.images || [],
       category_id: parsed.category_id || null,
       tags: parsed.tags || [],
-      metadata: parsed.metadata || {},
+      location_state: parsed.location_state,
+      location_lga: parsed.location_lga,
       status,
+      price_input_mode: priceInputMode,
       features: featuresArr,
       price_type: priceType || null,
       sale_type: saleType || null,
@@ -264,6 +310,62 @@ exports.getProduct = async (req, res) => {
   }
 };
 
+// Get single product details by slug
+exports.getProductBySlug = async (req, res) => {
+  const { slug } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "*, business:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone,slug, business_whatsapp_number)"
+      )
+      .eq("slug", slug)
+      .maybeSingle();
+
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Fetch failed", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
+
+    // Public-facing vendor preview: don't reveal contact fields
+    const vendorPreview = {
+      id: data.business?.id,
+      business_name: data.business?.business_name,
+      description: data.business.description,
+      cover_image: data.business?.cover_image,
+      slug: data.business?.slug,
+      address: data.business?.address
+        ? req.user
+          ? data.business.address
+          : null
+        : null,
+      business_phone: data.business?.business_phone
+        ? req.user
+          ? data.business.business_phone
+          : null
+        : null,
+      business_whatsApp_number: data.business?.business_whatsapp_number
+        ? req.user
+          ? data.business.business_whatsapp_number
+          : null
+        : null,
+    };
+
+    // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
+    const product = { ...data, business: vendorPreview };
+    return res.json({ success: true, product });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 exports.listProductsByVendor = async (req, res) => {
   const businessId = req.params.businessId;
 
@@ -303,6 +405,7 @@ exports.updateProduct = async (req, res) => {
       "price",
       "images",
       "categoryId",
+      "features",
       "tags",
       "metadata",
     ];
@@ -337,9 +440,40 @@ exports.updateProduct = async (req, res) => {
     if (vpErr || !vp || vp.owner_id !== user.id)
       return res.status(403).json({ success: false, message: "Forbidden" });
 
+    if (updates.name) {
+      updates.slug = generateSlug(updates.name);
+      let slugExists = true;
+      while (slugExists) {
+        const { data: productData, error: productError } = await supabase
+          .from("products")
+          .select("slug")
+          .eq("slug", updates.slug)
+          .not("id", "eq", id);
+
+        if (productError) {
+          throw productError;
+        }
+
+        const { data: businessData, error: businessError } = await supabase
+          .from("business_profile")
+          .select("slug")
+          .eq("slug", updates.slug);
+
+        if (businessError) {
+          throw businessError;
+        }
+
+        if (productData.length === 0 && businessData.length === 0) {
+          slugExists = false;
+        } else {
+          updates.slug = generateSlug(updates.name);
+        }
+      }
+    }
+
     const { data, error } = await supabase
       .from("products")
-      .update(parsed)
+      .update(updates)
       .eq("id", id)
       .select()
       .maybeSingle();

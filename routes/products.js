@@ -10,6 +10,11 @@ const {
 // Public
 router.get("/", productController.listProducts);
 router.get("/:id", optionalAuthMiddleware, productController.getProduct);
+router.get(
+  "/slug/:slug",
+  optionalAuthMiddleware,
+  productController.getProductBySlug
+);
 router.get("/business/:businessId", productController.listProductsByVendor);
 
 // Protected actions (vendor)
