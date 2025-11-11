@@ -1,5 +1,6 @@
 const { z } = require("zod");
 const { supabase } = require("../config/supabaseClient");
+const eventEmitter = require("../events/eventEmitter");
 
 const vendorSchema = z.object({
   business_name: z.string(),
@@ -11,7 +12,8 @@ const vendorSchema = z.object({
   phone_number: z.string().min(11, "Phone number must be at least 11 digits"),
   whatsapp_number: z
     .string()
-    .min(11, "WhatsApp number must be at least 11 digits"),
+    // .min(11, "WhatsApp number must be at least 11 digits")
+    .optional(),
   // status: z.string().optional(),
 });
 
@@ -108,8 +110,17 @@ exports.createBusinessProfile = async (req, res) => {
         role: "vendor", // Assuming this function is exclusively for vendors
         phone_number: payload.phone_number || null,
         whatsapp_number: payload.whatsapp_number || null,
+        shop_link: slug,
       })
       .eq("id", userId); // Use the same received userId to update the correct user
+    // console.log("business creation has finish and emitting event  ");
+
+    eventEmitter.emit("RECEIVED_BIZZ_ACCOUNT_APPLICATION", {
+      userId: userId,
+      businessProfileId: businessProfile.id,
+      email: req.user.email,
+      first_name: `${req.user.first_name}`,
+    }); // Emit event after successful creation                   z
 
     return res.status(201).json({ success: true, businessProfile });
   } catch (err) {
@@ -151,7 +162,6 @@ exports.updateVendor = async (req, res) => {
       "profile_image",
       "address",
       "description",
-      "status",
       "slug",
     ];
     const updates = {};
@@ -231,9 +241,10 @@ exports.updateMyBusinessProfile = async (req, res) => {
       .eq("owner_id", user.id)
       .maybeSingle();
     if (!existing)
-      return res
-        .status(404)
-        .json({ success: false, message: "Vendor profile not found for this user" });
+      return res.status(404).json({
+        success: false,
+        message: "Vendor profile not found for this user",
+      });
 
     // Accept partial updates
     const allowed = [
@@ -245,7 +256,6 @@ exports.updateMyBusinessProfile = async (req, res) => {
       "profile_image",
       "address",
       "description",
-      "status",
       "slug",
     ];
     const updates = {};
@@ -432,6 +442,14 @@ exports.getBusinessProfileBySlug = async (req, res) => {
         message: "Business profile not found",
       });
     }
+
+    //increase views count
+    supabase
+      .from("business_profile")
+      .update({ views_count: (profile.views_count || 0) + 1 })
+      .eq("slug", slug)
+      .then(() => {})
+      .catch(() => {});
 
     // If user is not authenticated, remove contact information
     if (!isAuthenticated) {

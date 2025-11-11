@@ -11,6 +11,7 @@ const adminDashboardRoutes = require("./routes/adminDashboard");
 const slugRoutes = require("./routes/slug");
 
 require("dotenv").config();
+require("./services/notificationService");
 
 const app = express();
 

@@ -262,7 +262,7 @@ exports.getProduct = async (req, res) => {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, business:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone,slug, business_whatsapp_number)"
+        "*, business:product_owner_id(id, owner_id, business_name, description, cover_image, address, business_phone,slug, business_whatsapp_number)"
       )
       .eq("id", id)
       .maybeSingle();
@@ -302,6 +302,15 @@ exports.getProduct = async (req, res) => {
 
     // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
     const product = { ...data, business: vendorPreview };
+
+    // Update views count asynchronously
+    supabase
+      .from("products")
+      .update({ views_count: (data.views_count || 0) + 1 })
+      .eq("id", id)
+      .then(() => {})
+      .catch(() => {});
+
     return res.json({ success: true, product });
   } catch (err) {
     return res
@@ -318,7 +327,7 @@ exports.getProductBySlug = async (req, res) => {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, business:product_owner_id(id, owner_id, business_name, cover_image, address, business_phone,slug, business_whatsapp_number)"
+        "*, business:product_owner_id(id, owner_id, business_name, description,cover_image, address, business_phone,slug, business_whatsapp_number)"
       )
       .eq("slug", slug)
       .maybeSingle();
@@ -358,6 +367,15 @@ exports.getProductBySlug = async (req, res) => {
 
     // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
     const product = { ...data, business: vendorPreview };
+
+    // Update views count asynchronously
+    supabase
+      .from("products")
+      .update({ views_count: (data.views_count || 0) + 1 })
+      .eq("slug", slug)
+      .then(() => {})
+      .catch(() => {});
+
     return res.json({ success: true, product });
   } catch (err) {
     return res
