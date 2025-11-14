@@ -37,12 +37,16 @@ function buildFilters(query) {
     filters.push({ col: "price", op: "gte", val: Number(query.minPrice) });
   if (query.maxPrice)
     filters.push({ col: "price", op: "lte", val: Number(query.maxPrice) });
-  if (query.vendorLocation)
+  if (query.locationState)
     filters.push({
-      col: "vendor_location",
+      col: "location_state",
       op: "ilike",
-      val: `%${query.vendorLocation}%`,
+      val: `%${query.locationState}%`,
     });
+  if (query.sale_type)
+    filters.push({ col: "sale_type", op: "eq", val: query.sale_type });
+  if (query.price_type)
+    filters.push({ col: "price_type", op: "eq", val: query.price_type });
   return filters;
 }
 
@@ -216,9 +220,9 @@ exports.listProducts = async (req, res) => {
 
     // Search
     if (req.query.q) {
-      builder = builder
-        .ilike("name", `%${req.query.q}%`)
-        .or(`description.ilike.%${req.query.q}%`);
+      const q = String(req.query.q).replace(/,/g, " ");
+      // Use PostgREST .or with ilike on both name and description
+      builder = builder.or(`name.ilike.%${q}%,description.ilike.%${q}%`);
     }
 
     // Sorting
