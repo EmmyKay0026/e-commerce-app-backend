@@ -2,7 +2,7 @@
 
 # --- Base Stage ---
 # Sets up the base Node.js environment.
-FROM node:18-alpine AS base
+FROM node:20-alpine AS base
 WORKDIR /app
 
 # --- Dependencies Stage ---
