@@ -1,0 +1,109 @@
+name: Backend CI/CD Pipeline (Targeted with Rollback)
+
+on:
+  push:
+    branches:
+      - main # Or your production branch
+
+jobs:
+  deploy_backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Backend Repo
+        uses: actions/checkout@v4
+        with:
+          path: backend
+
+      - name: 2. Deploy via SSH with Rollback Logic
+        uses: appleboy/ssh-action@v1.0.3
+
+        # This injects the .env file content into the script's environment
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
+
+        with:
+          host: ${{ secrets.HOST_IP }}
+          username: ${{ secrets.HOST_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+          script: |
+            # --- CONFIGURATION ---
+            PROJECT_DIR=/home/deployer/industrialmart-deployment
+            BACKEND_DIR=/home/deployer/e-commerce-app-backend
+
+            BACKEND_SERVICE_NAME="backend"
+            BACKEND_CONTAINER_NAME="backend-app" # From docker-compose.yml
+            ROLLBACK_TAG="${BACKEND_SERVICE_NAME}-backup-$(date +%s)"
+
+            # --- ROLLBACK FUNCTION ---
+            # This function is executed only if the health check fails.
+            rollback() {
+                echo "!!! Deployment FAILED. Initiating Rollback !!!"
+                cd $PROJECT_DIR
+                
+                # 1. Stop and remove the newly deployed (failing) service
+                docker compose stop $BACKEND_SERVICE_NAME
+                docker compose rm -f $BACKEND_SERVICE_NAME
+                
+                # 2. Restore the backup image tag to the primary name
+                echo "Restoring image $ROLLBACK_TAG to the primary tag..."
+                docker tag $BACKEND_SERVICE_NAME:$ROLLBACK_TAG $BACKEND_SERVICE_NAME:latest
+                
+                # 3. Redeploy the backup version
+                echo "Redeploying the previous working version..."
+                # --build is omitted to force use of the restored 'latest' tag
+                docker compose up -d --no-deps $BACKEND_SERVICE_NAME
+                
+                echo "Rollback Complete. The previous working API is now live."
+                exit 1
+            }
+
+            # --- EXECUTION ---
+            echo "Starting targeted backend deployment with rollback capability..."
+
+            # Navigate to the main project directory
+            cd $PROJECT_DIR
+
+            # 1. INJECT SECRETS
+            echo "$DOTENV_CONTENT" > .env
+            echo "Successfully injected secrets into .env file."
+
+            # 2. BACKUP CURRENT IMAGE
+            echo "Backing up current working image..."
+            CURRENT_IMAGE_ID=$(docker inspect --format='{{.Image}}' $BACKEND_CONTAINER_NAME 2>/dev/null)
+            if [ -n "$CURRENT_IMAGE_ID" ]; then
+                docker tag $CURRENT_IMAGE_ID $BACKEND_SERVICE_NAME:$ROLLBACK_TAG
+                echo "Backup saved as $BACKEND_SERVICE_NAME:$ROLLBACK_TAG"
+            else
+                echo "Warning: Could not find a running backend container. Proceeding without backup."
+            fi
+
+            # 3. PULL LATEST CODE
+            echo "Updating Backend code in $BACKEND_DIR..."
+            cd $BACKEND_DIR
+            git pull origin main
+
+            # 4. DEPLOY NEW VERSION
+            cd $PROJECT_DIR
+            echo "Building and deploying new backend..."
+            # Call rollback if docker compose command itself fails
+            docker compose up -d --no-deps --build $BACKEND_SERVICE_NAME || { echo "Docker Compose UP failed." && rollback; }
+
+            # 5. HEALTH CHECK
+            echo "Waiting 15 seconds for container to stabilize..."
+            sleep 15
+
+            STATUS=$(docker inspect --format='{{.State.Status}}' $BACKEND_CONTAINER_NAME 2>/dev/null)
+
+            if [ "$STATUS" == "running" ]; then
+                echo "Deployment successful. Backend service is running."
+                # 6. CLEANUP BACKUP
+                if [ -n "$CURRENT_IMAGE_ID" ]; then
+                    docker rmi $BACKEND_SERVICE_NAME:$ROLLBACK_TAG 2>/dev/null || true
+                    echo "Successfully cleaned up backup tag."
+                fi
+            else
+                echo "Health check FAILED. Container status: $STATUS"
+                rollback
+            fi

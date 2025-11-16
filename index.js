@@ -24,6 +24,8 @@ const corsOptions = {
       "http://www.industrialmart.ng",
       "https://www.industrialmart.ng",
       "https://industrialmart.ng",
+      "https://www.imart.amplity.agency/",
+      "https://imart.amplity.agency",
     ];
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, origin);
