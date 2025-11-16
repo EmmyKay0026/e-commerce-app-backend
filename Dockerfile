@@ -23,8 +23,9 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 appuser
 USER appuser
 
-# Expose the port the app runs on
-EXPOSE 3000
+# Set the port and expose it
+ENV PORT=5000
+EXPOSE 5000
 
 # Set the default command to run the app
 CMD ["node", "index.js"]
