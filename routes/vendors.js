@@ -7,7 +7,7 @@ const {
   optionalAuthMiddleware,
 } = require("../middlewares/authMiddleware");
 
-// Get all business profiles (admin only)
+// Get all business profiles (admin only) route
 router.get(
   "/",
   authMiddleware,
