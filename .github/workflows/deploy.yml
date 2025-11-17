@@ -18,14 +18,14 @@ jobs:
       - name: 2. Deploy via SSH with Rollback Logic
         uses: appleboy/ssh-action@v1.0.3
 
-        # This injects the .env file content into the script's environment
-        env:
-          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
-
         with:
           host: ${{ secrets.HOST_IP }}
           username: ${{ secrets.HOST_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+        # This injects the .env file content into the script's environment
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
 
           script: |
             # --- CONFIGURATION ---
