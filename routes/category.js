@@ -15,6 +15,7 @@ router.get(
 );
 router.get("/parent-cats", categoryController.listParentCategoriesOnly);
 router.get("/:id", categoryController.getCategory);
+// router.get("slug/:slug", categoryController.getCategoryBySlug);
 router.get(
   "/:id/with-parent-cats",
   categoryController.getCategoryWithParentCategories

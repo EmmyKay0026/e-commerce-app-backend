@@ -147,6 +147,31 @@ exports.getCategory = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+// Get a single category
+exports.getCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from("category")
+      .select("*")
+      .eq("id", id)
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Failed to fetch category", error });
+    if (!data)
+      return res
+        .status(404)
+        .json({ success: false, message: "Category not found" });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 
 // Get a single category with its parent categories
 exports.getCategoryWithParentCategories = async (req, res) => {

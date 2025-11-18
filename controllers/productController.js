@@ -4,11 +4,11 @@ const generateSlug = require("../lib/slugGenerator");
 
 // Schemas
 const productSchema = z.object({
-  name: z.string(),
+  name: z.string().min(2).max(20),
   slug: z.string().optional(),
   description: z.string().optional(),
   price: z.string(),
-  images: z.array(z.string()).min(3).optional(),
+  images: z.array(z.string()).min(1).max(5),
   category_id: z.string().optional(),
   location_state: z.string(),
   location_lga: z.string(),
@@ -37,11 +37,17 @@ function buildFilters(query) {
     filters.push({ col: "price", op: "gte", val: Number(query.minPrice) });
   if (query.maxPrice)
     filters.push({ col: "price", op: "lte", val: Number(query.maxPrice) });
-  if (query.locationState)
+  if (query.location_state)
     filters.push({
       col: "location_state",
       op: "ilike",
-      val: `%${query.locationState}%`,
+      val: `%${query.location_state}%`,
+    });
+  if (query.location_lga)
+    filters.push({
+      col: "location_lga",
+      op: "ilike",
+      val: `%${query.location_lga}%`,
     });
   if (query.sale_type)
     filters.push({ col: "sale_type", op: "eq", val: query.sale_type });
@@ -175,7 +181,7 @@ exports.addProduct = async (req, res) => {
       location_lga: parsed.location_lga,
       status,
       price_input_mode: priceInputMode,
-      features: featuresArr,
+      features: featuresArr.length > 0 ? featuresArr : null,
       price_type: priceType || null,
       sale_type: saleType || null,
     };

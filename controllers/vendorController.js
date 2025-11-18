@@ -89,6 +89,9 @@ exports.createBusinessProfile = async (req, res) => {
           status: "active",
           slug: slug,
           address: payload.business_address || null,
+          phone_number: payload.phone_number || null,
+
+          business_whatsapp_number: payload.whatsapp_number || null,
         },
       ])
       .select()
