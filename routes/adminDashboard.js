@@ -29,5 +29,8 @@ router.patch(
 // Analytics Routes
 router.get("/stats", adminDashboard.getDashboardStats);
 router.get("/activity", adminDashboard.getRecentActivity);
+router.get("/vendors-by-region", adminDashboard.getVendorsByRegion);
+router.get("/products-by-category", adminDashboard.getProductsByCategory);
+router.get("/active-locations-count", adminDashboard.getActiveLocationsCount);
 
 module.exports = router;
