@@ -110,9 +110,9 @@ async function purgeCloudflareCDN(urlToPurge) {
         data.errors
       );
     } else {
-      console.log(
-        `Cloudflare CDN cache purge initiated successfully for ${urlToPurge}.`
-      );
+      // console.log(
+      //   `Cloudflare CDN cache purge initiated successfully for ${urlToPurge}.`
+      // );
     }
   } catch (error) {
     console.error(

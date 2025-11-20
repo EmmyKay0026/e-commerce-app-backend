@@ -25,6 +25,9 @@ router.get(
   categoryController.getCategoryWithParentChildCategories
 );
 
+// Get filter options for a category
+router.get("/:id/filters", categoryController.getCategoryFilters);
+
 // Get all product realated to a category
 router.get("/:id/products", categoryController.listProductsByCategory);
 

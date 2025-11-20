@@ -9,6 +9,9 @@ const {
 
 // Public
 router.get("/", productController.listProducts);
+router.get("/top-ranking", productController.getTopRanking);
+router.get("/new-arrivals", productController.getNewArrivals);
+router.get("/top-deals", productController.getTopDeals);
 router.get("/:id", optionalAuthMiddleware, productController.getProduct);
 router.get(
   "/slug/:slug",

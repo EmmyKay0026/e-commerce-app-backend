@@ -10,9 +10,18 @@ const productSchema = z.object({
   price: z.string(),
   images: z.array(z.string()).min(1).max(5),
   category_id: z.string().optional(),
+  category_ids: z.array(z.string()).optional(),
   location_state: z.string(),
   location_lga: z.string(),
   metadata: z.any().optional(),
+  item_condition: z
+    .enum(["new", "refurbished", "used"])
+    .describe("Please indicate if the condition of the item")
+    .optional(),
+  amount_in_stock: z
+    .string()
+    .min(1, "Amount in stock must be at least 1")
+    .optional(),
 });
 // metadata: z
 //   .record(
@@ -30,8 +39,8 @@ const productSchema = z.object({
 // Helper: map query params to filters
 function buildFilters(query) {
   const filters = [];
-  if (query.category)
-    filters.push({ col: "category_id", op: "eq", val: query.category });
+  // if (query.category)
+  //   filters.push({ col: "category_id", op: "eq", val: query.category });
   if (query.tag) filters.push({ col: "tags", op: "cs", val: `{${query.tag}}` });
   if (query.minPrice)
     filters.push({ col: "price", op: "gte", val: Number(query.minPrice) });
@@ -53,7 +62,59 @@ function buildFilters(query) {
     filters.push({ col: "sale_type", op: "eq", val: query.sale_type });
   if (query.price_type)
     filters.push({ col: "price_type", op: "eq", val: query.price_type });
+  if (query.amount_in_stock)
+    filters.push({
+      col: "amount_in_stock",
+      op: "gte",
+      val: Number(query.amount_in_stock),
+    });
+  if (query.item_condition)
+    filters.push({
+      col: "item_condition",
+      op: "eq",
+      val: query.item_condition,
+    });
   return filters;
+}
+
+// Helper: Enrich products with location names
+async function enrichProductsWithLocations(products) {
+  if (!products || products.length === 0) return products;
+
+  const stateIds = [...new Set(products.map((p) => p.location_state).filter(Boolean))];
+  const lgaIds = [...new Set(products.map((p) => p.location_lga).filter(Boolean))];
+
+  let stateMap = {};
+  let lgaMap = {};
+
+  if (stateIds.length > 0) {
+    const { data: states } = await supabase
+      .from("state_location")
+      .select("state_id, name")
+      .in("state_id", stateIds);
+    if (states) {
+      states.forEach((s) => (stateMap[s.state_id] = s.name));
+    }
+  }
+
+  if (lgaIds.length > 0) {
+    const { data: lgas } = await supabase
+      .from("lga_location")
+      .select("lga_id, name")
+      .in("lga_id", lgaIds);
+    if (lgas) {
+      lgas.forEach((l) => (lgaMap[l.lga_id] = l.name));
+    }
+  }
+
+  return products.map((p) => ({
+    ...p,
+    state_name: stateMap[p.location_state] || p.location_state,
+    lga_name: lgaMap[p.location_lga] || p.location_lga,
+    // Optional: return object as requested
+    state: p.location_state ? { id: p.location_state, name: stateMap[p.location_state] } : null,
+    lga: p.location_lga ? { id: p.location_lga, name: lgaMap[p.location_lga] } : null,
+  }));
 }
 
 exports.addProduct = async (req, res) => {
@@ -175,15 +236,21 @@ exports.addProduct = async (req, res) => {
       description: parsed.description || null,
       price: parsed.price,
       images: parsed.images || [],
-      category_id: parsed.category_id || null,
+      // category_id: parsed.category_id || null, // Deprecated
       tags: parsed.tags || [],
       location_state: parsed.location_state,
       location_lga: parsed.location_lga,
       status,
+      item_condition: parsed.item_condition || null,
+      amount_in_stock: parsed.amount_in_stock || null,
       price_input_mode: priceInputMode,
       features: featuresArr.length > 0 ? featuresArr : null,
       price_type: priceType || null,
       sale_type: saleType || null,
+      category_id:
+        parsed.category_ids && parsed.category_ids.length > 0
+          ? parsed.category_ids[0]
+          : null,
     };
 
     const { data, error } = await supabase
@@ -196,6 +263,23 @@ exports.addProduct = async (req, res) => {
       return res
         .status(500)
         .json({ success: false, message: "Insert failed", error });
+
+    // Insert categories
+    if (parsed.category_ids && parsed.category_ids.length > 0) {
+      const catInserts = parsed.category_ids.map((cid) => ({
+        product_id: data.id,
+        category_id: cid,
+      }));
+      const { error: catError } = await supabase
+        .from("product_categories")
+        .insert(catInserts);
+
+      if (catError) {
+        console.error("Failed to link categories:", catError);
+        // Optional: rollback product creation?
+      }
+    }
+
     return res.status(201).json({ success: true, product: data });
   } catch (err) {
     return res
@@ -214,8 +298,17 @@ exports.listProducts = async (req, res) => {
 
     let builder = supabase
       .from("products")
-      .select("*, business:product_owner_id(id, business_name, cover_image)")
+      .select(
+        "*, business:product_owner_id(id, business_name, cover_image), product_categories!inner(category_id)"
+      )
       .eq("status", "active");
+
+    if (req.query.category) {
+      builder = builder.eq(
+        "product_categories.category_id",
+        req.query.category
+      );
+    }
 
     // Apply filters
     for (const f of filters) {
@@ -251,10 +344,12 @@ exports.listProducts = async (req, res) => {
         .status(500)
         .json({ success: false, message: "Query failed", error });
 
+    const enrichedProducts = await enrichProductsWithLocations(data || []);
+
     return res.json({
       page,
       perPage,
-      products: data || [],
+      products: enrichedProducts,
       total: count || null,
     });
   } catch (err) {
@@ -272,7 +367,7 @@ exports.getProduct = async (req, res) => {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, business:product_owner_id(id, owner_id, business_name, description, cover_image, address, business_phone,slug, business_whatsapp_number)"
+        "*, business:product_owner_id(id, owner_id, business_name, description, cover_image, address, business_phone,slug, business_whatsapp_number), categories:product_categories(category(*))"
       )
       .eq("id", id)
       .maybeSingle();
@@ -313,15 +408,18 @@ exports.getProduct = async (req, res) => {
     // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
     const product = { ...data, business: vendorPreview };
 
+    // Enrich with location
+    const [enrichedProduct] = await enrichProductsWithLocations([product]);
+
     // Update views count asynchronously
     supabase
       .from("products")
       .update({ views_count: (data.views_count || 0) + 1 })
       .eq("id", id)
-      .then(() => {})
-      .catch(() => {});
+      .then(() => { })
+      .catch(() => { });
 
-    return res.json({ success: true, product });
+    return res.json({ success: true, product: enrichedProduct });
   } catch (err) {
     return res
       .status(500)
@@ -337,7 +435,7 @@ exports.getProductBySlug = async (req, res) => {
     const { data, error } = await supabase
       .from("products")
       .select(
-        "*, business:product_owner_id(id, owner_id, business_name, description,cover_image, address, business_phone,slug, business_whatsapp_number)"
+        "*, business:product_owner_id(id, owner_id, business_name, description,cover_image, address, business_phone,slug, business_whatsapp_number), categories:product_categories(category(*))"
       )
       .eq("slug", slug)
       .maybeSingle();
@@ -378,15 +476,18 @@ exports.getProductBySlug = async (req, res) => {
     // If user is authenticated and owner is allowed, contact details handled via dedicated endpoint
     const product = { ...data, business: vendorPreview };
 
+    // Enrich with location
+    const [enrichedProduct] = await enrichProductsWithLocations([product]);
+
     // Update views count asynchronously
     supabase
       .from("products")
       .update({ views_count: (data.views_count || 0) + 1 })
       .eq("slug", slug)
-      .then(() => {})
-      .catch(() => {});
+      .then(() => { })
+      .catch(() => { });
 
-    return res.json({ success: true, product });
+    return res.json({ success: true, product: enrichedProduct });
   } catch (err) {
     return res
       .status(500)
@@ -410,7 +511,8 @@ exports.listProductsByVendor = async (req, res) => {
       return res
         .status(500)
         .json({ success: false, message: "Query failed", error });
-    return res.json({ success: true, data: data || [] });
+    const enrichedProducts = await enrichProductsWithLocations(data || []);
+    return res.json({ success: true, data: enrichedProducts });
   } catch (err) {
     return res
       .status(500)
@@ -424,7 +526,9 @@ exports.updateProduct = async (req, res) => {
   if (!user) return res.status(401).json({ message: "Unauthorized" });
 
   try {
+    // console.log("updateProduct called with body:", req.body);
     const parsed = productSchema.partial().parse(req.body);
+    // console.log("Parsed data:", parsed);
 
     // Accept partial updates
     const allowed = [
@@ -433,14 +537,49 @@ exports.updateProduct = async (req, res) => {
       "price",
       "images",
       "categoryId",
+      "category_ids",
       "features",
       "tags",
       "metadata",
+      "item_condition",
+      "amount_in_stock",
+      "location_state",
+      "location_lga",
+      "price_input_mode",
+      "price_type",
+      "sale_type",
     ];
     const updates = {};
     allowed.forEach((f) => {
       if (req.body[f] !== undefined) updates[f] = req.body[f];
     });
+
+    // console.log("Updates to apply:", updates);
+
+    // Sync category_id with the first category_id if provided
+    if (
+      req.body.category_ids !== undefined &&
+      Array.isArray(req.body.category_ids) &&
+      req.body.category_ids.length > 0
+    ) {
+      updates.category_id = req.body.category_ids[0];
+    }
+
+    // Normalize features: accept "a|b|c" or array
+    if (updates.features !== undefined && updates.features !== null) {
+      let featuresArr = [];
+      if (Array.isArray(updates.features)) {
+        featuresArr = updates.features
+          .map((f) => (typeof f === "string" ? f.trim() : f))
+          .filter(Boolean);
+      } else if (typeof updates.features === "string") {
+        featuresArr = updates.features
+          .split("|")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      updates.features = featuresArr.length > 0 ? featuresArr : null;
+    }
 
     if (Object.keys(updates).length === 0)
       return res
@@ -468,49 +607,46 @@ exports.updateProduct = async (req, res) => {
     if (vpErr || !vp || vp.owner_id !== user.id)
       return res.status(403).json({ success: false, message: "Forbidden" });
 
-    if (updates.name) {
-      updates.slug = generateSlug(updates.name);
-      let slugExists = true;
-      while (slugExists) {
-        const { data: productData, error: productError } = await supabase
-          .from("products")
-          .select("slug")
-          .eq("slug", updates.slug)
-          .not("id", "eq", id);
+    // Don't update slug - it should remain permanent throughout product lifecycle
+    // This prevents broken links and maintains SEO
 
-        if (productError) {
-          throw productError;
-        }
+    // Remove category_ids from updates - it's not a column in products table
+    // It will be handled separately via product_categories junction table
+    const { category_ids, ...productUpdates } = updates;
 
-        const { data: businessData, error: businessError } = await supabase
-          .from("business_profile")
-          .select("slug")
-          .eq("slug", updates.slug);
-
-        if (businessError) {
-          throw businessError;
-        }
-
-        if (productData.length === 0 && businessData.length === 0) {
-          slugExists = false;
-        } else {
-          updates.slug = generateSlug(updates.name);
-        }
-      }
-    }
-
+    // console.log("About to update product with:", productUpdates);
     const { data, error } = await supabase
       .from("products")
-      .update(updates)
+      .update(productUpdates)
       .eq("id", id)
       .select()
       .maybeSingle();
-    if (error)
+
+    if (error) {
+      console.error("Supabase update error:", error);
       return res
         .status(500)
         .json({ success: false, message: "Update failed", error });
-    return res.json({ product: data });
+    }
+
+    // Update categories
+    if (req.body.category_ids) {
+      // Delete old
+      await supabase.from("product_categories").delete().eq("product_id", id);
+      // Insert new
+      if (req.body.category_ids.length > 0) {
+        const catInserts = req.body.category_ids.map((cid) => ({
+          product_id: id,
+          category_id: cid,
+        }));
+        await supabase.from("product_categories").insert(catInserts);
+      }
+    }
+
+    // console.log("Product updated successfully:", data);
+    return res.json({ success: true, product: data });
   } catch (err) {
+    console.error("updateProduct error:", err);
     return res
       .status(400)
       .json({ success: false, message: "Invalid payload", error: err.message });
@@ -602,5 +738,117 @@ exports.recordContactView = async (req, res) => {
     return res
       .status(500)
       .json({ message: "Server error", error: err.message });
+  }
+};
+
+// Get top ranking products (by views_count)
+exports.getTopRanking = async (req, res) => {
+  try {
+    const limit = Math.min(20, Number(req.query.limit || 10));
+
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "*, business:product_owner_id(id, business_name, cover_image, slug), product_categories!inner(category_id)"
+      )
+      .eq("status", "active")
+      .order("views_count", { ascending: false })
+      .limit(limit);
+
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Query failed", error });
+
+    const enrichedProducts = await enrichProductsWithLocations(data || []);
+
+    return res.json({
+      success: true,
+      data: enrichedProducts,
+      total: enrichedProducts.length,
+    });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Get new arrivals (by created_at)
+exports.getNewArrivals = async (req, res) => {
+  try {
+    const limit = Math.min(20, Number(req.query.limit || 10));
+
+    const { data, error } = await supabase
+      .from("products")
+      .select(
+        "*, business:product_owner_id(id, business_name, cover_image, slug), product_categories!inner(category_id)"
+      )
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Query failed", error });
+
+    const enrichedProducts = await enrichProductsWithLocations(data || []);
+
+    return res.json({
+      success: true,
+      data: enrichedProducts,
+      total: enrichedProducts.length,
+    });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+// Get top deals (sorted by price ascending or other criteria)
+exports.getTopDeals = async (req, res) => {
+  try {
+    const limit = Math.min(20, Number(req.query.limit || 10));
+    const sort = req.query.sort || "price_asc"; // default to lowest price
+
+    let builder = supabase
+      .from("products")
+      .select(
+        "*, business:product_owner_id(id, business_name, cover_image, slug), product_categories!inner(category_id)"
+      )
+      .eq("status", "active");
+
+    // Apply sorting
+    if (sort === "price_asc") {
+      builder = builder.order("price", { ascending: true });
+    } else if (sort === "price_desc") {
+      builder = builder.order("price", { ascending: false });
+    } else if (sort === "newest") {
+      builder = builder.order("created_at", { ascending: false });
+    } else {
+      // Default to price ascending
+      builder = builder.order("price", { ascending: true });
+    }
+
+    const { data, error } = await builder.limit(limit);
+
+    if (error)
+      return res
+        .status(500)
+        .json({ success: false, message: "Query failed", error });
+
+    const enrichedProducts = await enrichProductsWithLocations(data || []);
+
+    return res.json({
+      success: true,
+      data: enrichedProducts,
+      total: enrichedProducts.length,
+    });
+  } catch (err) {
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
   }
 };
