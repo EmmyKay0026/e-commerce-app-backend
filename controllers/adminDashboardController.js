@@ -345,3 +345,207 @@ exports.getRecentActivity = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+// Get vendors grouped by region (top 5 states)
+exports.getVendorsByRegion = async (req, res) => {
+  try {
+    const limit = Math.min(20, Number(req.query.limit || 5));
+
+    // Get all active business profiles
+    const { data: businessProfiles, error: businessError } = await supabase
+      .from("business_profile")
+      .select("id")
+      .eq("status", "active");
+
+    if (businessError) throw businessError;
+
+    if (!businessProfiles || businessProfiles.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        total_vendors: 0,
+      });
+    }
+
+    const businessIds = businessProfiles.map((bp) => bp.id);
+
+    // Get products with location_state for these business profiles
+    const { data: products, error: productsError } = await supabase
+      .from("products")
+      .select("product_owner_id, location_state")
+      .in("product_owner_id", businessIds)
+      .not("location_state", "is", null);
+
+    if (productsError) throw productsError;
+
+    // Group vendors by state
+    const stateVendorMap = {};
+    const vendorStateMap = {}; // Track which state each vendor is in
+
+    products.forEach((product) => {
+      const state = product.location_state;
+      const vendorId = product.product_owner_id;
+
+      if (state && vendorId) {
+        // Only count each vendor once per state
+        if (!vendorStateMap[vendorId]) {
+          vendorStateMap[vendorId] = state;
+          stateVendorMap[state] = (stateVendorMap[state] || 0) + 1;
+        } else if (vendorStateMap[vendorId] === state) {
+          // Vendor already counted in this state
+          return;
+        }
+      }
+    });
+
+    // Get state names
+    const stateIds = Object.keys(stateVendorMap);
+
+    if (stateIds.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        total_vendors: businessProfiles.length,
+      });
+    }
+
+    const { data: states, error: statesError } = await supabase
+      .from("state_location")
+      .select("state_id, name")
+      .in("state_id", stateIds);
+
+    if (statesError) throw statesError;
+
+    // Create state name lookup
+    const stateNameMap = {};
+    states.forEach((state) => {
+      stateNameMap[state.state_id] = state.name;
+    });
+
+    // Calculate total vendors
+    const totalVendors = businessProfiles.length;
+
+    // Create result array with percentages
+    const results = Object.entries(stateVendorMap).map(([stateId, count]) => ({
+      state: stateNameMap[stateId] || stateId,
+      state_id: stateId,
+      vendors: count,
+      percentage: totalVendors > 0 ? Math.round((count / totalVendors) * 100) : 0,
+    }));
+
+    // Sort by vendor count descending and limit
+    results.sort((a, b) => b.vendors - a.vendors);
+    const topResults = results.slice(0, limit);
+
+    res.json({
+      success: true,
+      data: topResults,
+      total_vendors: totalVendors,
+    });
+  } catch (error) {
+    console.error("Error in getVendorsByRegion:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get product counts by category
+exports.getProductsByCategory = async (req, res) => {
+  try {
+    const limit = Math.min(20, Number(req.query.limit || 10));
+
+    // Get all active categories
+    const { data: categories, error: categoriesError } = await supabase
+      .from("category")
+      .select("id, name, slug")
+      .eq("status", "active")
+      .order("name", { ascending: true });
+
+    if (categoriesError) throw categoriesError;
+
+    if (!categories || categories.length === 0) {
+      return res.json({
+        success: true,
+        data: [],
+        total_products: 0,
+      });
+    }
+
+    // Count products for each category via junction table
+    const categoriesWithCounts = await Promise.all(
+      categories.map(async (category) => {
+        const { count, error: countError } = await supabase
+          .from("product_categories")
+          .select("*", { count: "exact", head: true })
+          .eq("category_id", category.id);
+
+        if (countError) {
+          console.error(`Error counting products for category ${category.id}:`, countError);
+          return {
+            category: category.name,
+            slug: category.slug,
+            value: 0,
+            fill: `hsl(var(--chart-1))`,
+          };
+        }
+
+        return {
+          category: category.name,
+          slug: category.slug,
+          value: count || 0,
+          fill: `hsl(var(--chart-${(categories.indexOf(category) % 5) + 1}))`,
+        };
+      })
+    );
+
+    // Sort by count descending
+    categoriesWithCounts.sort((a, b) => b.value - a.value);
+
+    // Take top N categories
+    const topCategories = categoriesWithCounts.slice(0, limit);
+
+    // Calculate total products
+    const totalProducts = categoriesWithCounts.reduce((sum, cat) => sum + cat.value, 0);
+
+    res.json({
+      success: true,
+      data: topCategories,
+      total_products: totalProducts,
+    });
+  } catch (error) {
+    console.error("Error in getProductsByCategory:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Get count of active locations (unique LGAs where products exist)
+exports.getActiveLocationsCount = async (req, res) => {
+  try {
+    // Get all active products with location_lga
+    const { data: products, error: productsError } = await supabase
+      .from("products")
+      .select("location_lga")
+      .eq("status", "active")
+      .not("location_lga", "is", null);
+
+    if (productsError) throw productsError;
+
+    // Count unique location_lga values
+    const uniqueLGAs = new Set();
+    products.forEach((product) => {
+      if (product.location_lga) {
+        uniqueLGAs.add(product.location_lga);
+      }
+    });
+
+    const count = uniqueLGAs.size;
+
+    res.json({
+      success: true,
+      count,
+      total_products: products.length,
+    });
+  } catch (error) {
+    console.error("Error in getActiveLocationsCount:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
