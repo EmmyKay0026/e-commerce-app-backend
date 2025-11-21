@@ -304,10 +304,22 @@ exports.listProducts = async (req, res) => {
       .eq("status", "active");
 
     if (req.query.category) {
-      builder = builder.eq(
-        "product_categories.category_id",
-        req.query.category
-      );
+      // Handle both single and multiple category IDs (comma-separated)
+      const categoryIds = String(req.query.category).split(',').filter(Boolean);
+
+      if (categoryIds.length === 1) {
+        // Single category - use eq
+        builder = builder.eq(
+          "product_categories.category_id",
+          categoryIds[0]
+        );
+      } else if (categoryIds.length > 1) {
+        // Multiple categories - use in
+        builder = builder.in(
+          "product_categories.category_id",
+          categoryIds
+        );
+      }
     }
 
     // Apply filters
@@ -498,21 +510,61 @@ exports.getProductBySlug = async (req, res) => {
 exports.listProductsByVendor = async (req, res) => {
   const businessId = req.params.businessId;
 
-  // console.log(businessId);
-
   try {
-    const { data, error } = await supabase
+    // Parse pagination parameters
+    const page = Math.max(1, Number(req.query.page || 1));
+    const perPage = Math.min(100, Number(req.query.perPage || 30));
+    const offset = (page - 1) * perPage;
+
+    // Build query
+    let builder = supabase
       .from("products")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("product_owner_id", businessId)
-      .eq("status", "active")
-      .order("created_at", { ascending: false });
+      .eq("status", "active");
+
+    // Search functionality
+    if (req.query.q || req.query.search) {
+      const searchTerm = String(req.query.q || req.query.search).replace(/,/g, " ");
+      builder = builder.or(`name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+    }
+
+    // Sorting
+    const sort = req.query.sort || "latest";
+    if (sort === "latest") {
+      builder = builder.order("created_at", { ascending: false });
+    } else if (sort === "price_asc") {
+      builder = builder.order("price", { ascending: true });
+    } else if (sort === "price_desc") {
+      builder = builder.order("price", { ascending: false });
+    } else {
+      // Default to latest
+      builder = builder.order("created_at", { ascending: false });
+    }
+
+    // Apply pagination
+    const { data, error, count } = await builder
+      .range(offset, offset + perPage - 1);
+
     if (error)
       return res
         .status(500)
         .json({ success: false, message: "Query failed", error });
+
     const enrichedProducts = await enrichProductsWithLocations(data || []);
-    return res.json({ success: true, data: enrichedProducts });
+
+    // Calculate hasMore
+    const total = count || 0;
+    const hasMore = offset + perPage < total;
+
+    return res.json({
+      success: true,
+      data: enrichedProducts,
+      page,
+      perPage,
+      total,
+      hasMore,
+    });
   } catch (err) {
     return res
       .status(500)

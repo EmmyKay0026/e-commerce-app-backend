@@ -47,9 +47,9 @@ exports.createBusinessProfile = async (req, res) => {
     let slug = payload.slug
       ? payload.slug
       : payload.business_name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/(^-|-$)+/g, "");
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/(^-|-$)+/g, "");
     let slugExists = true;
     while (slugExists) {
       const { data: productData, error: productError } = await supabase
@@ -89,7 +89,7 @@ exports.createBusinessProfile = async (req, res) => {
           status: "active",
           slug: slug,
           address: payload.business_address || null,
-          phone_number: payload.phone_number || null,
+          business_phone: payload.phone_number || null,
 
           business_whatsapp_number: payload.whatsapp_number || null,
         },
@@ -451,8 +451,8 @@ exports.getBusinessProfileBySlug = async (req, res) => {
       .from("business_profile")
       .update({ views_count: (profile.views_count || 0) + 1 })
       .eq("slug", slug)
-      .then(() => {})
-      .catch(() => {});
+      .then(() => { })
+      .catch(() => { });
 
     // If user is not authenticated, remove contact information
     if (!isAuthenticated) {
@@ -524,10 +524,10 @@ exports.getAllBusinessProfiles = async (req, res) => {
     if (search) {
       query = query.or(
         "business_name.ilike.%" +
-          search +
-          "%,business_email.ilike.%" +
-          search +
-          "%"
+        search +
+        "%,business_email.ilike.%" +
+        search +
+        "%"
       );
     }
 
