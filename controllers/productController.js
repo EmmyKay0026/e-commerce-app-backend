@@ -1,6 +1,7 @@
 const { supabase } = require("../config/supabaseClient");
 const { z } = require("zod");
 const generateSlug = require("../lib/slugGenerator");
+const { rankProducts } = require("../lib/ranking");
 
 // Schemas
 const productSchema = z.object({
@@ -299,7 +300,8 @@ exports.listProducts = async (req, res) => {
     let builder = supabase
       .from("products")
       .select(
-        "*, business:product_owner_id(id, business_name, cover_image), product_categories!inner(category_id)"
+        "*, business:product_owner_id(id, business_name, cover_image, vendor_rating), product_categories!inner(category_id)",
+        { count: "exact" }
       )
       .eq("status", "active");
 
@@ -337,33 +339,72 @@ exports.listProducts = async (req, res) => {
     }
 
     // Sorting
-    if (req.query.sort === "newest")
-      builder = builder.order("created_at", { ascending: false });
-    else if (req.query.sort === "price_asc")
-      builder = builder.order("price", { ascending: true });
-    else if (req.query.sort === "price_desc")
-      builder = builder.order("price", { ascending: false });
-    else if (req.query.sort === "popular")
-      builder = builder.order("views_count", { ascending: false });
-    else builder = builder.order("created_at", { ascending: false });
+    // If sorting is "popular" or default (which was created_at), we use our new ranking algorithm
+    // If user explicitly asks for price_asc/desc or newest, we might want to respect that strictly,
+    // OR we can mix it in. The requirement says "The algorithm must prioritize relevant products...".
+    // Usually, "Sort By: Price" should be strict. "Sort By: Recommended" (default) should use the algorithm.
+    // The current code defaults to "created_at" (newest).
+    // Let's assume if sort is "recommended" or default/missing, we use ranking.
+    // If sort is specific (price, newest), we use DB sorting.
 
-    const { data, error, count } = await builder
-      .range(offset, offset + perPage - 1)
-      .throwOnError();
+    const useRanking = !req.query.sort || req.query.sort === "recommended";
 
-    if (error)
-      return res
-        .status(500)
-        .json({ success: false, message: "Query failed", error });
+    if (!useRanking) {
+      if (req.query.sort === "newest")
+        builder = builder.order("created_at", { ascending: false });
+      else if (req.query.sort === "price_asc")
+        builder = builder.order("price", { ascending: true });
+      else if (req.query.sort === "price_desc")
+        builder = builder.order("price", { ascending: false });
+      else if (req.query.sort === "popular")
+        builder = builder.order("views_count", { ascending: false });
 
-    const enrichedProducts = await enrichProductsWithLocations(data || []);
+      // DB Pagination for standard sorts
+      const { data, error, count } = await builder
+        .range(offset, offset + perPage - 1)
+        .throwOnError();
 
-    return res.json({
-      page,
-      perPage,
-      products: enrichedProducts,
-      total: count || null,
-    });
+      if (error) throw error;
+
+      const enrichedProducts = await enrichProductsWithLocations(data || []);
+      return res.json({
+        page,
+        perPage,
+        products: enrichedProducts,
+        total: count || null,
+      });
+    } else {
+      // Use Ranking Algorithm
+      // Fetch candidate set (e.g., 500)
+      // We still need to respect filters applied to builder
+      const CANDIDATE_LIMIT = 500;
+
+      // We need to fetch enough products to rank, but not everything.
+      // We can't easily get "total count" without a separate query if we limit.
+      // But supabase .select('*', { count: 'exact' }) gives total matching filters.
+
+      const { data, error, count } = await builder
+        .limit(CANDIDATE_LIMIT)
+        .throwOnError();
+
+      if (error) throw error;
+
+      // Rank products
+      const ranked = rankProducts(data || []);
+
+      // In-memory pagination
+      const paginated = ranked.slice(offset, offset + perPage);
+
+
+      const enrichedProducts = await enrichProductsWithLocations(paginated);
+
+      return res.json({
+        page,
+        perPage,
+        products: enrichedProducts,
+        total: count || 0, // Total matching filters (approx if > limit, but count: exact handles it)
+      });
+    }
   } catch (err) {
     return res
       .status(500)
