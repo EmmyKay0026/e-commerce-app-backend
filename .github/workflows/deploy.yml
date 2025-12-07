@@ -25,6 +25,8 @@ env:
 
   # Docker Compose Service Name (used in docker-compose.yml)
   BACKEND_SERVICE_NAME: backend
+  # Assumes container name is service-app for health checks
+  BACKEND_CONTAINER_NAME: backend-app
 
 jobs:
   # ----------------------------------------------------
@@ -33,9 +35,10 @@ jobs:
   build-and-push:
     runs-on: ubuntu-latest
 
-    # Outputs the unique SHA tag for use in the deployment job
+    # Outputs the unique SHA tag and the required lowercase repo path
     outputs:
       sha_tag: ${{ steps.get_sha_tag.outputs.sha_tag }}
+      lower_repo: ${{ steps.repo_path.outputs.lower_repo }}
 
     steps:
       - name: ⬇️ Checkout Repository
@@ -77,6 +80,13 @@ jobs:
           SHA_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep 'sha-')
           echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
 
+      - name: 📄 Get Lowercase Repo Path
+        id: repo_path
+        run: |
+          # Converts the repository owner/name to lowercase (FIXES THE CAPITALIZATION ERROR)
+          LOWER_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "lower_repo=$LOWER_REPO" >> $GITHUB_OUTPUT
+
   # ----------------------------------------------------
   # JOB 2: Deploy to Server (PULL, Not Build)
   # ----------------------------------------------------
@@ -98,10 +108,11 @@ jobs:
             # --- CONFIGURATION ---
             PROJECT_DIR="${{ env.PROJECT_DIR }}"
             BACKEND_SERVICE_NAME="${{ env.BACKEND_SERVICE_NAME }}"
-            BACKEND_CONTAINER_NAME="${BACKEND_SERVICE_NAME}-app" # Assumes container name is service-app
+            BACKEND_CONTAINER_NAME="${{ env.BACKEND_CONTAINER_NAME }}"
 
             # Use the unique SHA tag passed from the CI job
             NEW_TAG="${{ env.NEW_IMAGE_TAG }}"
+            NEW_IMAGE_PATH="${{ env.NEW_IMAGE_PATH }}"
 
             # File to store the previously stable image tag (for rollback)
             PREVIOUS_TAG_FILE="$PROJECT_DIR/previous_stable_tag_${BACKEND_SERVICE_NAME}.txt"
@@ -112,15 +123,16 @@ jobs:
                 cd "$PROJECT_DIR"
                 
                 # 1. Get the last known stable tag
+                # Uses fallback logic to handle the initial run where the file might not exist
                 if [ -f "$PREVIOUS_TAG_FILE" ]; then
                     PREVIOUS_TAG=$(cat "$PREVIOUS_TAG_FILE")
                 else
-                    echo "Error: Previous stable tag not found. Cannot rollback fully."
-                    exit 1
+                    PREVIOUS_TAG="latest" # Fallback tag for initial deployment
+                    echo "Warning: Previous stable tag file not found. Rolling back to 'latest'."
                 fi
                 
                 # 2. Construct the rollback image path
-                ROLLBACK_IMAGE_PATH="${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:$PREVIOUS_TAG"
+                ROLLBACK_IMAGE_PATH="${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.lower_repo }}/${{ env.IMAGE_NAME }}:$PREVIOUS_TAG"
                 echo "Rolling back to image: $ROLLBACK_IMAGE_PATH"
                 
                 # 3. Use sed to update the docker-compose file with the PREVIOUS_TAG
@@ -141,7 +153,6 @@ jobs:
             cd "$PROJECT_DIR"
 
             # 1. INJECT SECRETS
-            # The DOTENV_CONTENT variable is passed securely via the 'env' block below
             echo "$DOTENV_CONTENT" > .env
             echo "Successfully injected secrets into .env file."
 
@@ -154,14 +165,13 @@ jobs:
             echo "Previous stable tag recorded: $PREVIOUS_TAG"
 
             # 3. UPDATE COMPOSE FILE AND PULL NEW IMAGE
-            echo "Updating docker-compose.yml with new tag: ${{ env.NEW_IMAGE_PATH }}"
+            echo "Updating docker-compose.yml with new tag: $NEW_IMAGE_PATH"
 
             # Update the image line in the docker-compose file
-            sed -i "s|image: .*/${{ env.IMAGE_NAME }}:.*|image: ${{ env.NEW_IMAGE_PATH }}|" docker-compose.yml
+            sed -i "s|image: .*/${{ env.IMAGE_NAME }}:.*|image: $NEW_IMAGE_PATH|" docker-compose.yml
 
             # Pull the new image from GHCR
-            # NOTE: Docker daemon on the server must be logged into ghcr.io
-            docker pull ${{ env.NEW_IMAGE_PATH }}
+            docker pull $NEW_IMAGE_PATH
 
             # 4. DEPLOY NEW VERSION
             echo "Deploying new backend version..."
@@ -171,7 +181,6 @@ jobs:
             echo "Waiting 15 seconds for container to stabilize..."
             sleep 15
 
-            # Modify this health check command if your backend uses a different container name or check.
             STATUS=$(docker inspect --format='{{.State.Status}}' $BACKEND_CONTAINER_NAME 2>/dev/null)
 
             if [ "$STATUS" == "running" ]; then
@@ -189,4 +198,5 @@ jobs:
         env:
           DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
           NEW_IMAGE_TAG: ${{ needs.build-and-push.outputs.sha_tag }}
-          NEW_IMAGE_PATH: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.sha_tag }}
+          # 🚨 FIXED PATH: Using the lowercase repository name 🚨
+          NEW_IMAGE_PATH: ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.lower_repo }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.sha_tag }}
