@@ -1,58 +1,133 @@
-name: Backend CI/CD Pipeline (Targeted with Rollback)
+name: 🐳 Backend CI/CD Pipeline (GH Actions Build)
 
 on:
   push:
     branches:
-      - main # Or your production branch
+      - main
+
+# Permissions required for pushing to ghcr.io
+permissions:
+  contents: read
+  packages: write
+
+# Environment variables used throughout the workflow
+env:
+  # General Settings
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ecommerce-backend # Your backend image name
+
+  # Server Configuration (Set using secrets in the deploy job for security)
+  SERVER_USER: ${{ secrets.DEPLOY_USER }}
+  SERVER_HOST: ${{ secrets.DEPLOY_HOST }}
+
+  # Deployment Paths (must match your server)
+  PROJECT_DIR: /home/deployer/industrialmart-deployment
+
+  # Docker Compose Service Name (used in docker-compose.yml)
+  BACKEND_SERVICE_NAME: backend
 
 jobs:
-  deploy_backend:
+  # ----------------------------------------------------
+  # JOB 1: Build Docker Image on GitHub and Push to GHCR
+  # ----------------------------------------------------
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    # Outputs the unique SHA tag for use in the deployment job
+    outputs:
+      sha_tag: ${{ steps.get_sha_tag.outputs.sha_tag }}
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+
+      # REQUIRED: Set up Buildx for GHCR caching
+      - name: ⚙️ Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-,format=short # Unique tag
+            type=raw,value=latest,enable=true # Latest tag
+
+      - name: 🔨 Build and Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Assumes Dockerfile is at the root of the repo
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 📄 Get unique SHA tag for deployment
+        id: get_sha_tag
+        run: |
+          SHA_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep 'sha-')
+          echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
+
+  # ----------------------------------------------------
+  # JOB 2: Deploy to Server (PULL, Not Build)
+  # ----------------------------------------------------
+  deploy:
+    needs: build-and-push # Must wait for the build to finish
     runs-on: ubuntu-latest
 
     steps:
-      - name: 1. Checkout Backend Repo
-        uses: actions/checkout@v4
-        with:
-          path: backend
-
-      - name: 2. Deploy via SSH with Rollback Logic
+      - name: 🚢 Deploy via SSH with Rollback Logic
         uses: appleboy/ssh-action@v1.0.3
 
+        # 1. SSH CONNECTION PARAMETERS (Under 'with:')
         with:
-          host: ${{ secrets.HOST_IP }}
-          username: ${{ secrets.HOST_USER }}
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-        # This injects the .env file content into the script's environment
-        env:
-          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
 
           script: |
             # --- CONFIGURATION ---
-            PROJECT_DIR=/home/deployer/industrialmart-deployment
-            BACKEND_DIR=/home/deployer/e-commerce-app-backend
+            PROJECT_DIR="${{ env.PROJECT_DIR }}"
+            BACKEND_SERVICE_NAME="${{ env.BACKEND_SERVICE_NAME }}"
+            BACKEND_CONTAINER_NAME="${BACKEND_SERVICE_NAME}-app" # Assumes container name is service-app
 
-            BACKEND_SERVICE_NAME="backend"
-            BACKEND_CONTAINER_NAME="backend-app" # From docker-compose.yml
-            ROLLBACK_TAG="${BACKEND_SERVICE_NAME}-backup-$(date +%s)"
+            # Use the unique SHA tag passed from the CI job
+            NEW_TAG="${{ env.NEW_IMAGE_TAG }}"
+
+            # File to store the previously stable image tag (for rollback)
+            PREVIOUS_TAG_FILE="$PROJECT_DIR/previous_stable_tag_${BACKEND_SERVICE_NAME}.txt"
 
             # --- ROLLBACK FUNCTION ---
-            # This function is executed only if the health check fails.
             rollback() {
                 echo "!!! Deployment FAILED. Initiating Rollback !!!"
-                cd $PROJECT_DIR
+                cd "$PROJECT_DIR"
                 
-                # 1. Stop and remove the newly deployed (failing) service
-                docker compose stop $BACKEND_SERVICE_NAME
-                docker compose rm -f $BACKEND_SERVICE_NAME
+                # 1. Get the last known stable tag
+                if [ -f "$PREVIOUS_TAG_FILE" ]; then
+                    PREVIOUS_TAG=$(cat "$PREVIOUS_TAG_FILE")
+                else
+                    echo "Error: Previous stable tag not found. Cannot rollback fully."
+                    exit 1
+                fi
                 
-                # 2. Restore the backup image tag to the primary name
-                echo "Restoring image $ROLLBACK_TAG to the primary tag..."
-                docker tag $BACKEND_SERVICE_NAME:$ROLLBACK_TAG $BACKEND_SERVICE_NAME:latest
+                # 2. Construct the rollback image path
+                ROLLBACK_IMAGE_PATH="${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:$PREVIOUS_TAG"
+                echo "Rolling back to image: $ROLLBACK_IMAGE_PATH"
                 
-                # 3. Redeploy the backup version
-                echo "Redeploying the previous working version..."
-                # --build is omitted to force use of the restored 'latest' tag
+                # 3. Use sed to update the docker-compose file with the PREVIOUS_TAG
+                sed -i "s|image: .*/${{ env.IMAGE_NAME }}:.*|image: $ROLLBACK_IMAGE_PATH|" docker-compose.yml
+                
+                # 4. Pull and Redeploy the backup version
+                docker pull $ROLLBACK_IMAGE_PATH
                 docker compose up -d --no-deps $BACKEND_SERVICE_NAME
                 
                 echo "Rollback Complete. The previous working API is now live."
@@ -60,50 +135,58 @@ jobs:
             }
 
             # --- EXECUTION ---
-            echo "Starting targeted backend deployment with rollback capability..."
+            echo "Starting targeted backend deployment (PULL method)..."
 
             # Navigate to the main project directory
-            cd $PROJECT_DIR
+            cd "$PROJECT_DIR"
 
             # 1. INJECT SECRETS
+            # The DOTENV_CONTENT variable is passed securely via the 'env' block below
             echo "$DOTENV_CONTENT" > .env
             echo "Successfully injected secrets into .env file."
 
-            # 2. BACKUP CURRENT IMAGE
-            echo "Backing up current working image..."
-            CURRENT_IMAGE_ID=$(docker inspect --format='{{.Image}}' $BACKEND_CONTAINER_NAME 2>/dev/null)
-            if [ -n "$CURRENT_IMAGE_ID" ]; then
-                docker tag $CURRENT_IMAGE_ID $BACKEND_SERVICE_NAME:$ROLLBACK_TAG
-                echo "Backup saved as $BACKEND_SERVICE_NAME:$ROLLBACK_TAG"
+            # 2. RECORD PREVIOUS STABLE TAG
+            if [ -f "$PREVIOUS_TAG_FILE" ]; then
+                PREVIOUS_TAG=$(cat "$PREVIOUS_TAG_FILE")
             else
-                echo "Warning: Could not find a running backend container. Proceeding without backup."
+                PREVIOUS_TAG="latest" # Fallback for first run
             fi
+            echo "Previous stable tag recorded: $PREVIOUS_TAG"
 
-            # 3. PULL LATEST CODE
-            echo "Updating Backend code in $BACKEND_DIR..."
-            cd $BACKEND_DIR
-            git pull origin main
+            # 3. UPDATE COMPOSE FILE AND PULL NEW IMAGE
+            echo "Updating docker-compose.yml with new tag: ${{ env.NEW_IMAGE_PATH }}"
+
+            # Update the image line in the docker-compose file
+            sed -i "s|image: .*/${{ env.IMAGE_NAME }}:.*|image: ${{ env.NEW_IMAGE_PATH }}|" docker-compose.yml
+
+            # Pull the new image from GHCR
+            # NOTE: Docker daemon on the server must be logged into ghcr.io
+            docker pull ${{ env.NEW_IMAGE_PATH }}
 
             # 4. DEPLOY NEW VERSION
-            cd $PROJECT_DIR
-            echo "Building and deploying new backend..."
-            # Call rollback if docker compose command itself fails
-            docker compose up -d --no-deps --build $BACKEND_SERVICE_NAME || { echo "Docker Compose UP failed." && rollback; }
+            echo "Deploying new backend version..."
+            docker compose up -d --no-deps $BACKEND_SERVICE_NAME || { echo "Docker Compose UP failed." && rollback; }
 
             # 5. HEALTH CHECK
             echo "Waiting 15 seconds for container to stabilize..."
             sleep 15
 
+            # Modify this health check command if your backend uses a different container name or check.
             STATUS=$(docker inspect --format='{{.State.Status}}' $BACKEND_CONTAINER_NAME 2>/dev/null)
 
             if [ "$STATUS" == "running" ]; then
                 echo "Deployment successful. Backend service is running."
-                # 6. CLEANUP BACKUP
-                if [ -n "$CURRENT_IMAGE_ID" ]; then
-                    docker rmi $BACKEND_SERVICE_NAME:$ROLLBACK_TAG 2>/dev/null || true
-                    echo "Successfully cleaned up backup tag."
-                fi
+                
+                # 6. SAVE CURRENT TAG
+                echo "$NEW_TAG" > "$PREVIOUS_TAG_FILE"
+                echo "New stable tag saved for future rollbacks."
             else
                 echo "Health check FAILED. Container status: $STATUS"
                 rollback
             fi
+
+        # 2. ENVIRONMENT VARIABLES (CORRECTLY ALIGNED WITH 'with:')
+        env:
+          DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
+          NEW_IMAGE_TAG: ${{ needs.build-and-push.outputs.sha_tag }}
+          NEW_IMAGE_PATH: ${{ env.REGISTRY }}/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.sha_tag }}
