@@ -13,7 +13,7 @@ const transporter = nodemailer.createTransport({
     pass: process.env.SMTP_PASSWORD,
   },
 });
-
+//
 // /**
 //  * Fetches the template content and compiles it with user data.
 //  * @param {string} templateName - The name (key) of the template in the DB.
