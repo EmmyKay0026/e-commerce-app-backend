@@ -14,7 +14,7 @@ permissions:
 env:
   # General Settings
   REGISTRY: ghcr.io
-  IMAGE_NAME: ecommerce-backend # Your backend image name
+  IMAGE_NAME: ecommerce-backend
 
   # Server Configuration (Set using secrets in the deploy job for security)
   SERVER_USER: ${{ secrets.DEPLOY_USER }}
@@ -25,7 +25,6 @@ env:
 
   # Docker Compose Service Name (used in docker-compose.yml)
   BACKEND_SERVICE_NAME: backend
-  # Assumes container name is service-app for health checks
   BACKEND_CONTAINER_NAME: backend-app
 
 jobs:
@@ -44,7 +43,6 @@ jobs:
       - name: ⬇️ Checkout Repository
         uses: actions/checkout@v4
 
-      # REQUIRED: Set up Buildx for GHCR caching
       - name: ⚙️ Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -67,31 +65,35 @@ jobs:
       - name: 🔨 Build and Push Docker image
         uses: docker/build-push-action@v5
         with:
-          context: . # Assumes Dockerfile is at the root of the repo
+          context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # 🚨 FIX: Extracting ONLY the tag string using grep and sed 🚨
       - name: 📄 Get unique SHA tag for deployment
         id: get_sha_tag
         run: |
-          SHA_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep 'sha-')
+          # The meta output is a list of full image paths. 
+          # We grep for the unique SHA tag line and use sed to remove everything up to the last colon (:)
+          # to ensure the output is ONLY the tag, e.g., sha-abcdef1
+          TAGS="${{ steps.meta.outputs.tags }}"
+          SHA_TAG=$(echo "$TAGS" | grep 'sha-' | sed 's/.*://') 
           echo "sha_tag=$SHA_TAG" >> $GITHUB_OUTPUT
 
       - name: 📄 Get Lowercase Repo Path
         id: repo_path
         run: |
-          # Converts the repository owner/name to lowercase (FIXES THE CAPITALIZATION ERROR)
+          # Converts the repository owner/name to lowercase (e.g., EmmyKay0026 -> emmykay0026)
           LOWER_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "lower_repo=$LOWER_REPO" >> $GITHUB_OUTPUT
-
   # ----------------------------------------------------
   # JOB 2: Deploy to Server (PULL, Not Build)
   # ----------------------------------------------------
   deploy:
-    needs: build-and-push # Must wait for the build to finish
+    needs: build-and-push
     runs-on: ubuntu-latest
 
     steps:
@@ -110,11 +112,9 @@ jobs:
             BACKEND_SERVICE_NAME="${{ env.BACKEND_SERVICE_NAME }}"
             BACKEND_CONTAINER_NAME="${{ env.BACKEND_CONTAINER_NAME }}"
 
-            # Use the unique SHA tag passed from the CI job
             NEW_TAG="${{ env.NEW_IMAGE_TAG }}"
             NEW_IMAGE_PATH="${{ env.NEW_IMAGE_PATH }}"
 
-            # File to store the previously stable image tag (for rollback)
             PREVIOUS_TAG_FILE="$PROJECT_DIR/previous_stable_tag_${BACKEND_SERVICE_NAME}.txt"
 
             # --- ROLLBACK FUNCTION ---
@@ -122,23 +122,21 @@ jobs:
                 echo "!!! Deployment FAILED. Initiating Rollback !!!"
                 cd "$PROJECT_DIR"
                 
-                # 1. Get the last known stable tag
-                # Uses fallback logic to handle the initial run where the file might not exist
                 if [ -f "$PREVIOUS_TAG_FILE" ]; then
                     PREVIOUS_TAG=$(cat "$PREVIOUS_TAG_FILE")
                 else
-                    PREVIOUS_TAG="latest" # Fallback tag for initial deployment
+                    PREVIOUS_TAG="latest"
                     echo "Warning: Previous stable tag file not found. Rolling back to 'latest'."
                 fi
                 
-                # 2. Construct the rollback image path
+                # Construct the rollback image path using the explicit components
                 ROLLBACK_IMAGE_PATH="${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.lower_repo }}/${{ env.IMAGE_NAME }}:$PREVIOUS_TAG"
                 echo "Rolling back to image: $ROLLBACK_IMAGE_PATH"
                 
-                # 3. Use sed to update the docker-compose file with the PREVIOUS_TAG
+                # Update the compose file with the previous stable tag
                 sed -i "s|image: .*/${{ env.IMAGE_NAME }}:.*|image: $ROLLBACK_IMAGE_PATH|" docker-compose.yml
                 
-                # 4. Pull and Redeploy the backup version
+                # Pull and Redeploy the backup version
                 docker pull $ROLLBACK_IMAGE_PATH
                 docker compose up -d --no-deps $BACKEND_SERVICE_NAME
                 
@@ -149,7 +147,6 @@ jobs:
             # --- EXECUTION ---
             echo "Starting targeted backend deployment (PULL method)..."
 
-            # Navigate to the main project directory
             cd "$PROJECT_DIR"
 
             # 1. INJECT SECRETS
@@ -160,14 +157,14 @@ jobs:
             if [ -f "$PREVIOUS_TAG_FILE" ]; then
                 PREVIOUS_TAG=$(cat "$PREVIOUS_TAG_FILE")
             else
-                PREVIOUS_TAG="latest" # Fallback for first run
+                PREVIOUS_TAG="latest"
             fi
             echo "Previous stable tag recorded: $PREVIOUS_TAG"
 
             # 3. UPDATE COMPOSE FILE AND PULL NEW IMAGE
             echo "Updating docker-compose.yml with new tag: $NEW_IMAGE_PATH"
 
-            # Update the image line in the docker-compose file
+            # This sed command now uses the correctly constructed NEW_IMAGE_PATH
             sed -i "s|image: .*/${{ env.IMAGE_NAME }}:.*|image: $NEW_IMAGE_PATH|" docker-compose.yml
 
             # Pull the new image from GHCR
@@ -198,5 +195,5 @@ jobs:
         env:
           DOTENV_CONTENT: ${{ secrets.DOTENV_CONTENT }}
           NEW_IMAGE_TAG: ${{ needs.build-and-push.outputs.sha_tag }}
-          # 🚨 FIXED PATH: Using the lowercase repository name 🚨
+          # Path constructed using outputs: lower_repo and sha_tag are now guaranteed to be clean
           NEW_IMAGE_PATH: ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.lower_repo }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.sha_tag }}
