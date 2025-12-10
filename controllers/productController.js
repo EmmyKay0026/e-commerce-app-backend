@@ -2,6 +2,7 @@ const { supabase } = require("../config/supabaseClient");
 const { z } = require("zod");
 const generateSlug = require("../lib/slugGenerator");
 const { rankProducts } = require("../lib/ranking");
+const eventEmitter = require("../events/eventEmitter");
 
 // Schemas
 const productSchema = z.object({
@@ -280,6 +281,14 @@ exports.addProduct = async (req, res) => {
         // Optional: rollback product creation?
       }
     }
+
+    // Emit event for Admin Notification
+    eventEmitter.emit("NEW_PRODUCT_UPLOADED", {
+      product_name: data.name,
+      vendor_id: vp.id,
+      vendor_name: vp.business_name,
+      slug: data.slug,
+    });
 
     return res.status(201).json({ success: true, product: data });
   } catch (err) {

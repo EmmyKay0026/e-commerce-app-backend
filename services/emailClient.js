@@ -70,6 +70,11 @@ const fetchAndCompileTemplate = async (templateName, data) => {
       .eq("name", templateName)
       .single();
 
+    if (templateData) {
+      console.log(`[EmailClient] Fetched template subject: ${templateData.subject}`);
+      // console.log(`[EmailClient] Fetched HTML length: ${templateData.html_content?.length}`);
+    }
+
     if (error || !templateData) {
       console.error(
         `Error fetching email template '${templateName}'. Please ensure the 'email_templates' table exists and contains a template with this name.`,
@@ -98,7 +103,8 @@ const fetchAndCompileTemplate = async (templateName, data) => {
 
 const emailClient = {
   sendEmail: async ({ to, templateName, data }) => {
-    // console.log("has gotten to emailClient");
+    console.log(`[EmailClient] Sending '${templateName}' to '${to}'`);
+    console.log(`[EmailClient] Data payload:`, JSON.stringify(data, null, 2));
 
     let { htmlContent, subject } = await fetchAndCompileTemplate(
       templateName,
@@ -120,9 +126,8 @@ const emailClient = {
       console.warn(
         `Template '${templateName}' not found. Sending plain text fallback.`
       );
-      const textContent = `Dear ${
-        data.first_name || "User"
-      },\n\nThis is a notification from our service.\n\n${data.message || ""}`;
+      const textContent = `Dear ${data.first_name || "User"
+        },\n\nThis is a notification from our service.\n\n${data.message || ""}`;
       mailOptions = {
         from: process.env.SENDER_EMAIL,
         to: to,

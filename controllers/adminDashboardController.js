@@ -1,6 +1,7 @@
 const { success } = require("zod");
 const { supabase } = require("../config/supabaseClient");
 const { logAdminActivity } = require("./adminLogController");
+const eventEmitter = require("../events/eventEmitter");
 
 // User Management
 exports.listUsers = async (req, res) => {
@@ -15,12 +16,12 @@ exports.listUsers = async (req, res) => {
     if (search) {
       query = query.or(
         "email.ilike.%" +
-          search +
-          "%,first_name.ilike.%" +
-          search +
-          "%,last_name.ilike.%" +
-          search +
-          "%"
+        search +
+        "%,first_name.ilike.%" +
+        search +
+        "%,last_name.ilike.%" +
+        search +
+        "%"
       );
     }
 
@@ -108,10 +109,10 @@ exports.listBusinessProfiles = async (req, res) => {
     if (search) {
       query = query.or(
         "business_name.ilike.%" +
-          search +
-          "%,business_email.ilike.%" +
-          search +
-          "%"
+        search +
+        "%,business_email.ilike.%" +
+        search +
+        "%"
       );
     }
 
@@ -156,10 +157,10 @@ exports.getPendingVerifcationBusinessProfiles = async (req, res) => {
       // adjust fields to match your schema (e.g. business_name, vendor_email)
       query = query.or(
         "business_name.ilike.%" +
-          search +
-          "%,business_email.ilike.%" +
-          search +
-          "%"
+        search +
+        "%,business_email.ilike.%" +
+        search +
+        "%"
       );
     }
 
@@ -246,6 +247,23 @@ exports.updateBusinessProfileStatus = async (req, res) => {
       message: "Business status updated successfully",
       businessAccount,
     });
+
+    // Emit email events
+    if (status === "active") {
+      eventEmitter.emit("BIZZ_ACCOUNT_APPROVAL", {
+        email: businessAccount.business_email, // Or owner email if business email not set
+        owner_id: businessAccount.owner_id,
+        business_name: businessAccount.business_name,
+      });
+    } else if (status === "suspended") {
+      eventEmitter.emit("BIZZ_ACCOUNT_SUSPENSION", {
+        owner_id: businessAccount.owner_id,
+        business_name: businessAccount.business_name,
+        reason,
+      });
+    } else if (status === "rejected") {
+      // Optional: Add rejection email trigger if template exists
+    }
   } catch (error) {
     console.error("Error in updateVendorStatus:", error);
     res.status(500).json({ success: false, error: error.message });
